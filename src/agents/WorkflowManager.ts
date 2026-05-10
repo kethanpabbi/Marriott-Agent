@@ -34,34 +34,33 @@ export class WorkflowManager {
     // 3. User Context Retrieval
     const user = await userAgent.getOrCreateUser(email);
 
-    // 4. Smart Hotel Retrieval (History-Aware)
-    let hotels = await hotelsAgent.searchHotels(query);
+    // 4. Smart Hotel Retrieval (Autonomous Location Detection)
+    let hotels: any[] = [];
+    let activeLocation: string | undefined;
     
-    // If query yields nothing, search for the most recently active location
-    if (hotels.length === 0) {
-       const locations = ['london', 'hawaii', 'maui', 'venice', 'kyoto', 'maldives', 'paris', 'oahu', 'honolulu', 'mumbai'];
-       
-       // 1. Detect location in current query or history
-       let activeLocation = locations.find(l => query.toLowerCase().includes(l));
-       
-       if (!activeLocation) {
-         // Check history in reverse
-         for (const msg of [...history].reverse()) {
-           activeLocation = locations.find(l => msg.content.toLowerCase().includes(l));
-           if (activeLocation) break;
-         }
-       }
-       
-       if (activeLocation) {
-         await hotelsAgent.syncLocation(activeLocation, scraperService);
-         hotels = await hotelsAgent.searchHotels(activeLocation);
-       } else {
-         // Fallback to all hotels
-         hotels = await hotelsAgent.searchHotels("");
-       }
+    // 1. Detect location in current query
+    const detectPrompt = `Identify the city or destination in this query: "${query}". 
+    History Context: ${history.slice(-2).map(m => m.content).join(' | ')}
+    Respond with ONLY the city name or "none".`;
+    
+    const detected = await llmService.generateResponse([{ role: 'user', content: detectPrompt }]);
+    if (detected && detected.toLowerCase() !== 'none') {
+      activeLocation = detected.toLowerCase().trim();
     }
     
-    // Ensure the AI has a balanced set of hotels (Prefer current context)
+    if (activeLocation) {
+      console.log(`🎯 Location Lock: ${activeLocation}`);
+      await hotelsAgent.syncLocation(activeLocation, scraperService);
+      hotels = await hotelsAgent.searchHotels(activeLocation);
+    } else {
+      hotels = await hotelsAgent.searchHotels(query);
+    }
+    
+    // If still empty, use global pool
+    if (hotels.length === 0) {
+      hotels = await hotelsAgent.searchHotels("");
+    }
+    
     const filteredHotels = hotels.slice(0, 10);
 
     // 5. Generate Response & Suggestions using LLM
