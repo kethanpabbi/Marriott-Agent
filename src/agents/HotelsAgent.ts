@@ -118,7 +118,7 @@ export class HotelsAgent {
       TASK:
       1. Extract REAL Marriott properties.
       2. For each, you MUST find or provide the ACTUAL REAL-WORLD RATING (e.g. 4.7/5). 
-      3. If the scraped text has a rating, use it. If not, use your knowledge of the property's real-world standing as of 2024.
+      3. If the scraped text has a rating, use it. If not, use your knowledge of the property's real-world standing as of 2026.
       4. DO NOT MAKE UP NUMBERS. Use 0.0 ONLY if the property is brand new and unrated.
       
       OUTPUT ONLY JSON. NO PREAMBLE.
