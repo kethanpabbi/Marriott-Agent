@@ -44,9 +44,19 @@ export class LLMService {
       });
 
       const data = await response.json();
-      return data.content[0].text;
+      
+      if (!response.ok) {
+        console.error('Claude API Error Details:', JSON.stringify(data, null, 2));
+        return `MARRIOTT LUMINA: I encountered an error with the AI provider (${response.status}). ${data.error?.message || ''}`;
+      }
+
+      if (data.content && data.content.length > 0) {
+        return data.content[0].text;
+      }
+      
+      return "I received an unexpected response format from the AI.";
     } catch (error) {
-      console.error('Claude API Error:', error);
+      console.error('Connection Error:', error);
       return "I apologize, but I'm having trouble connecting to my intelligence module right now.";
     }
   }
