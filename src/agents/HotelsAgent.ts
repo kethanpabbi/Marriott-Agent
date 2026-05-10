@@ -103,7 +103,6 @@ export class HotelsAgent {
       ],
       'delhi': [
         { name: "JW Marriott Hotel New Delhi Aerocity", location: "Asset Area 4, Aerocity, Delhi", priceRange: "$200 - $550", description: "A premier five-star luxury hotel near the international airport.", amenities: "24-hour Spa, Outdoor Pool, Fitness Center", restaurants: "K3 Food Theatre, Adrift Kaya", activities: "Shopping at DLF Promenade, City Tours", region: "Asia" },
-        { name: "ITC Maurya, a Luxury Collection Hotel, New Delhi", location: "Diplomatic Enclave, New Delhi", priceRange: "$250 - $700", description: "Iconic luxury property known for hosting heads of state.", amenities: "Luxury Spa, Signature Pool, Butler Service", restaurants: "Bukhara, Dum Pukht", activities: "Historical Tours, Fine Dining", region: "Asia" },
         { name: "Aloft New Delhi Aerocity", location: "Asset 5B, Aerocity, Delhi", priceRange: "$100 - $250", description: "Modern, tech-forward hotel with a vibrant urban atmosphere.", amenities: "W XYZ Bar, Re:charge Gym, Splash Pool", restaurants: "Nook", activities: "Nightlife, Airport Proximity", region: "Asia" }
       ],
       'kyoto': [
