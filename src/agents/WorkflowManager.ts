@@ -34,30 +34,17 @@ export class WorkflowManager {
     // 3. User Context Retrieval
     const user = await userAgent.getOrCreateUser(email);
 
-    // 4. PROGRAMMATIC CONTEXT TRACKING
-    // Before asking the AI, we identify the last city discussed in history to "lock" the context.
-    const cityKeywords = ['london', 'paris', 'mumbai', 'kyoto', 'dublin', 'melbourne', 'sydney', 'new york', 'tokyo', 'berlin', 'barcelona', 'chennai', 'bangalore'];
-    let lastCity = "none";
-    for (const msg of [...history].reverse()) {
-      const found = cityKeywords.find(city => msg.content.toLowerCase().includes(city));
-      if (found) {
-        lastCity = found;
-        break;
-      }
-    }
-
-    // 5. AGENTIC REASONING & LEARNING STEP
+    // 4. AGENTIC REASONING & LEARNING STEP
+    // We ask the LLM to analyze the situation, identify the active city from history, and decide on discovery.
     const reasoningPrompt = `
         Analyze the user's latest query and the conversation history.
         
-        CONTEXT LOCK: The last city discussed was "${lastCity}".
-        
         TASK:
-        1. "activeLocation": Identify the city/cities. If it's a follow-up (e.g. "which is cheaper?"), STRICTLY USE "${lastCity}" unless a new city is mentioned.
-        2. "isFollowUp": true if this query relies on previous context.
-        3. "needsSync": true if new data is required for the city.
+        1. "activeLocation": Identify the CURRENT city/cities. If the user asks a follow-up (e.g. "which is cheaper?", "what's the difference?"), you MUST identify the most recent city discussed in the history. Do NOT default to old cities like Paris if a newer city was discussed.
+        2. "isFollowUp": true if this query relies on the context of the previous turn.
+        3. "needsSync": true if new data is required.
         4. "userProfileUpdate": Extract new preferences.
-        5. "reasoning": Your logic.
+        5. "reasoning": Explain your logic, specifically identifying the last city discussed.
         
         OUTPUT ONLY JSON:
         { 
