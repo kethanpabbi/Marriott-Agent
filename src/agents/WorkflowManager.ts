@@ -71,8 +71,8 @@ export class WorkflowManager {
       );
     });
 
-    // 5. Generate Response using LLM with History
-    const response = await this.generateAIResponse(filteredHotels, query, user, history);
+    // 5. Generate Response & Suggestions using LLM
+    const { response, suggestions } = await this.generateAIResponse(filteredHotels, query, user, history);
 
     // 6. Log Interaction
     await userAgent.logInteraction(email, 'user', query);
@@ -80,8 +80,69 @@ export class WorkflowManager {
 
     return {
       response,
-      suggestions: this.getSuggestedQuestions(query),
+      suggestions: suggestions || ["Show me Marriotts in London", "What are the best Marriotts for families?", "Tell me about Marriott activities in Hawaii"],
     };
+  }
+
+  private async generateAIResponse(hotels: any[], query: string, user: any, history: any[]): Promise<{ response: string, suggestions: string[] }> {
+    if (hotels.length === 0) {
+      return { 
+        response: "I couldn't find any Marriott properties matching that specific request. Would you like to try searching for a different region or type of hotel?",
+        suggestions: ["Show me Marriotts in London", "Find hotels in Paris", "What are the best beach resorts?"]
+      };
+    }
+
+    const hotelContext = hotels.slice(0, 3).map(h => `
+      ID: ${h.id}
+      Name: ${h.name}
+      Location: ${h.location}
+      Price: ${h.priceRange}
+      Amenities: ${h.amenities}
+      Restaurants: ${h.restaurants}
+      Activities: ${h.activities}
+      Description: ${h.description}
+      Attractions: ${h.nearbyAttractions?.map((a: any) => `${a.name} (${a.distance})`).join(', ')}
+    `).join('\n---\n');
+
+    const messages = [
+      { 
+        role: 'system', 
+        content: `You are Marriott Lumina, a premium AI concierge. 
+        Your goal is to provide luxurious, helpful, and accurate information about Marriott properties.
+        
+        CRITICAL: Always stay in context. If the user asks a follow-up, use the "Available Hotels" provided below.
+        
+        OUTPUT FORMAT:
+        1. Your helpful response in Markdown.
+        2. A section at the end starting with "SUGGESTIONS:" followed by 3 contextually relevant follow-up questions, one per line.
+        
+        Example Suggestions for Paris:
+        SUGGESTIONS:
+        What are the room types available in Paris?
+        Tell me about the dining at the Champs-Elysees hotel.
+        What other Marriotts are near the Eiffel Tower?
+        
+        Available Hotels in Context:
+        ${hotelContext}
+        
+        User Preferences:
+        Likes: ${user.likes.join(', ')}
+        Dislikes: ${user.dislikes.join(', ')}`
+      },
+      ...history.slice(-5).map(m => ({ role: m.role, content: m.content })),
+      { role: 'user', content: query }
+    ];
+
+    const rawResponse = await llmService.generateResponse(messages as any);
+    
+    // Parse response and suggestions
+    const parts = rawResponse.split(/SUGGESTIONS:/i);
+    const responseText = parts[0].trim();
+    const suggestions = parts[1] 
+      ? parts[1].split('\n').map(s => s.replace(/^\d+\.\s*/, '').replace(/^[•*-]\s*/, '').trim()).filter(s => s.length > 5).slice(0, 3)
+      : [];
+
+    return { response: responseText, suggestions };
   }
 
   private isMarriottRelated(query: string, history: any[]): boolean {
@@ -99,54 +160,5 @@ export class WorkflowManager {
       'show me', 'find', 'nearby', 'tourist', 'family'
     ];
     return keywords.some(k => query.toLowerCase().includes(k));
-  }
-
-  private async generateAIResponse(hotels: any[], query: string, user: any, history: any[]): Promise<string> {
-    if (hotels.length === 0) {
-      return "I couldn't find any Marriott properties matching that specific request. Would you like to try searching for a different region or type of hotel?";
-    }
-
-    const hotelContext = hotels.slice(0, 3).map(h => `
-      Name: ${h.name}
-      Location: ${h.location}
-      Price: ${h.priceRange}
-      Amenities: ${h.amenities}
-      Restaurants: ${h.restaurants}
-      Activities: ${h.activities}
-      Description: ${h.description}
-      Attractions: ${h.nearbyAttractions?.map((a: any) => `${a.name} (${a.distance})`).join(', ')}
-    `).join('\n---\n');
-
-    const messages = [
-      { 
-        role: 'system', 
-        content: `You are Marriott Lumina, a premium AI concierge. 
-        Your goal is to provide luxurious, helpful, and accurate information about Marriott properties.
-        Always format your output beautifully using Markdown (bolding, lists, etc.) but avoid heavy headers like # or ##. 
-        Use symbols like ✓ or • for lists.
-        
-        Available Hotels in Context:
-        ${hotelContext}
-        
-        User Preferences:
-        Likes: ${user.likes.join(', ')}
-        Dislikes: ${user.dislikes.join(', ')}`
-      },
-      ...history.slice(-5).map(m => ({ role: m.role, content: m.content })),
-      { role: 'user', content: query }
-    ];
-
-    return await llmService.generateResponse(messages as any);
-  }
-
-  private getSuggestedQuestions(query: string): string[] {
-    const q = query.toLowerCase();
-    if (q.includes('hotel') || q.includes('stay') || q.includes('paris') || q.includes('london') || q.includes('maui')) {
-      return ["What are the dining options?", "Are there any tourist attractions nearby?", "What is the pricing for a standard room?"];
-    }
-    if (q.includes('price') || q.includes('cost')) {
-      return ["Do you have cheaper options?", "What amenities are included?", "Show me luxury suites"];
-    }
-    return ["Show me Marriotts in London", "What are the best Marriotts for families?", "Tell me about Marriott activities in Hawaii"];
   }
 }
