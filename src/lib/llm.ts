@@ -41,7 +41,7 @@ export class LLMService {
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-          model: 'claude-4-5-haiku',
+          model: 'claude-3-5-sonnet-latest',
           max_tokens: 1024,
           messages: chatMessages.map(m => ({ role: m.role, content: m.content })),
           system: systemMessage
