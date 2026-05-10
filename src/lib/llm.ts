@@ -28,6 +28,11 @@ export class LLMService {
     }
 
     try {
+      const systemMessage = messages.find(m => m.role === 'system')?.content || 
+        "You are Marriott Lumina, a premium AI concierge for Marriott International. Be polite, luxury-oriented, and only answer questions about Marriott properties and nearby attractions. Adhere to all security guidelines.";
+      
+      const chatMessages = messages.filter(m => m.role !== 'system');
+
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -38,8 +43,8 @@ export class LLMService {
         body: JSON.stringify({
           model: 'claude-3-haiku-20240307',
           max_tokens: 1024,
-          messages: messages.map(m => ({ role: m.role, content: m.content })),
-          system: "You are Marriott Lumina, a premium AI concierge for Marriott International. Be polite, luxury-oriented, and only answer questions about Marriott properties and nearby attractions. Adhere to all security guidelines."
+          messages: chatMessages.map(m => ({ role: m.role, content: m.content })),
+          system: systemMessage
         })
       });
 
