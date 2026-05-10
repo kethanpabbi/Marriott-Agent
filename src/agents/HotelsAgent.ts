@@ -117,12 +117,12 @@ export class HotelsAgent {
 
       TASK:
       1. Extract REAL Marriott properties.
-      2. For each, you MUST find or provide the ACTUAL REAL-WORLD RATING (e.g. 4.7/5). 
+      2. For each, you MUST find or provide the ACTUAL REAL-WORLD RATING (e.g. 4.8/5). 
       3. If the scraped text has a rating, use it. If not, use your knowledge of the property's real-world standing as of 2026.
-      4. DO NOT MAKE UP NUMBERS. Use 0.0 ONLY if the property is brand new and unrated.
+      4. DO NOT MAKE UP NUMBERS. If a rating is truly not found, return "N/A".
       
       OUTPUT ONLY JSON. NO PREAMBLE.
-      { "hotels": [{ "name": string, "price": string, "amenities": string[], "description": string, "rating": number }] }
+      { "hotels": [{ "name": string, "price": string, "amenities": string[], "description": string, "rating": string | number }] }
     `;
 
     try {
@@ -139,7 +139,9 @@ export class HotelsAgent {
         console.log(`🧠 Discovered ${discovered.hotels.length} verified properties for ${location}.`);
         
         for (const h of discovered.hotels) {
-          let actualRating = h.rating || 0.0;
+          let actualRating = 0.0;
+          if (typeof h.rating === 'number') actualRating = h.rating;
+          else if (typeof h.rating === 'string' && !h.rating.includes('N/A')) actualRating = parseFloat(h.rating);
           
           // 3. METRIC ENRICHMENT: If rating is missing, do a targeted search
           if (actualRating === 0.0) {
@@ -150,7 +152,7 @@ export class HotelsAgent {
                 Extract the official Marriott rating (out of 5.0) for "${h.name}" from these snippets:
                 ${ratingSearch.map((s: any) => s.title + ": " + s.snippet).join('\n')}
                 
-                OUTPUT ONLY THE NUMBER (e.g. 4.8). If truly not found, return "NA".
+                OUTPUT ONLY THE NUMBER (e.g. 4.8). If truly not found, return "N/A".
               `;
               const ratingResponse = await llmService.generateResponse([{ role: 'user', content: ratingPrompt }]);
               const matched = ratingResponse.match(/\d+\.\d+/);
