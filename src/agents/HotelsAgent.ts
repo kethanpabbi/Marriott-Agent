@@ -111,22 +111,11 @@ export class HotelsAgent {
       console.error("Scrape Error:", err);
     }
 
-    // 3. GENERATIVE DISCOVERY FALLBACK
-    // If the scrape fails, we use the agent's internal reasoning to identify the most likely 
-    // Marriott flagship in that city, ensuring the user always gets a relevant answer.
+    // 3. NO HALLUCINATION FALLBACK
+    // If the scrape fails, we return an empty list.
     if (properties.length === 0) {
-      console.log(`🧠 Scrape unsuccessful. Using Generative Discovery for ${location}...`);
-      properties = [{
-        name: `JW Marriott ${location}`,
-        location: `Central ${location}`,
-        priceRange: "$200 - $550",
-        description: `Experience elevated luxury at the JW Marriott ${location}, perfectly positioned for both business and leisure.`,
-        amenities: "JW Spa, Infinity Pool, Executive Lounge, 24-hour Gym",
-        restaurants: "JW Kitchen, Signature Grill",
-        activities: `City sightseeing and cultural tours of ${location}`,
-        region: "Autonomous Discovery",
-        rating: 4.7
-      }];
+      console.log(`⚠️ Discovery unsuccessful for ${location}. No hotels found.`);
+      return false;
     }
     
     // Persist discovered properties to database
