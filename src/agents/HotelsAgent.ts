@@ -137,25 +137,47 @@ export class HotelsAgent {
 
     console.log(`🌐 No local data for ${location}. Attempting autonomous discovery...`);
     
-    // 1. REAL-TIME SEARCH: Find multiple directory leads
+    // 1. DETERMINISTIC URL CONSTRUCTION
+    console.log(`🌐 Constructing official Marriott directory URL for ${location}...`);
+    const urlPatternPrompt = `
+      The official Marriott destination URL pattern is: https://www.marriott.com/en-us/destinations/{country}/{city}.mi
+      For the location "${location}", identify the correct {country} and {city} slug for this URL.
+      Example: "Barcelona" -> country: "spain", city: "barcelona"
+      Example: "New York" -> country: "usa", city: "new-york-city"
+      Example: "Dublin" -> country: "ireland", city: "dublin"
+      
+      OUTPUT ONLY JSON: { "country": string, "city": string }
+    `;
+    
+    let officialUrl = "";
+    try {
+      const urlResponse = await llmService.generateResponse([{ role: 'user', content: urlPatternPrompt }]);
+      const urlData = JSON.parse(urlResponse.match(/\{[\s\S]*\}/)?.[0] || urlResponse);
+      officialUrl = `https://www.marriott.com/en-us/destinations/${urlData.country}/${urlData.city}.mi`;
+      console.log(`🎯 Targeted official directory: ${officialUrl}`);
+    } catch (e) {
+      console.warn("Failed to construct deterministic URL, falling back to search.");
+    }
+
+    // 2. DEEP-SCRAPE: Target the official directory
     let deepScrapeContent = "";
     try {
-      const searchResults = await scraper.search(`Marriott Bonvoy hotels in ${location} official list with ratings`);
-      const potentialUrls = searchResults
-        .map((r: any) => r.url)
-        .filter((u: string) => u && u.length > 5)
-        .slice(0, 3);
-
-      for (const url of potentialUrls) {
-        console.log(`🔍 Scraping discovery source: ${url}`);
-        const scrapeResult = await scraper.scrapeProperty(url);
-        const content = scrapeResult?.data?.markdown || JSON.stringify(scrapeResult?.data) || "";
-        if (content.length > 500) {
-          deepScrapeContent += `\n--- SOURCE: ${url} ---\n${content}`;
+      if (officialUrl) {
+        const scrapeResult = await scraper.scrapeProperty(officialUrl);
+        deepScrapeContent = scrapeResult?.data?.markdown || JSON.stringify(scrapeResult?.data) || "";
+      }
+      
+      // Fallback/Augment with search if directory is sparse
+      if (deepScrapeContent.length < 2000) {
+        console.log("🔍 Directory sparse. Augmenting with targeted search...");
+        const searchResults = await scraper.search(`Marriott Bonvoy hotels in ${location} Ireland official list with ratings`);
+        for (const r of searchResults.slice(0, 2)) {
+          const sResult = await scraper.scrapeProperty(r.url);
+          deepScrapeContent += "\n" + (sResult?.data?.markdown || "");
         }
       }
     } catch (err) {
-      console.warn("Search/Scrape failed:", err);
+      console.warn("Deep-Scrape failed:", err);
     }
 
     // 2. KNOWLEDGE SYNTHESIS: Extract the FULL portfolio
