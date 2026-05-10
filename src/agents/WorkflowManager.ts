@@ -34,10 +34,9 @@ export class WorkflowManager {
     if (history.length > 0) {
       const lastAssistantMsg = [...history].reverse().find(m => m.role === 'assistant');
       if (lastAssistantMsg) {
-        // Simple regex to find cities mentioned in the last response
-        const cities = ['singapore', 'dubai', 'london', 'berlin', 'barcelona', 'melbourne', 'new york', 'paris', 'tokyo'];
-        const found = cities.find(c => lastAssistantMsg.content.toLowerCase().includes(c));
-        if (found) lastOfferedCity = found;
+        // We pass the content of the last response to the reasoning prompt 
+        // and let the LLM extract the location autonomously.
+        lastOfferedCity = "See History Turn -1"; 
       }
     }
 
