@@ -22,14 +22,8 @@ export class WorkflowManager {
       };
     }
 
-    // 2. Scope Enforcement
+    // 2. AGENTIC REASONING & LEARNING STEP (Now includes Scope Detection)
     const history = await userAgent.getChatHistory(email);
-    if (!this.isMarriottRelated(query, history)) {
-      return {
-        response: "I am here specifically to assist you with Marriott International properties and nearby attractions. How can I help you find your next Marriott stay?",
-        suggestions: ["Show me Marriotts in London", "What are the best Marriotts for families?", "Tell me about Marriott activities in Hawaii"],
-      };
-    }
 
     // 3. User Context Retrieval
     const user = await userAgent.getOrCreateUser(email);
@@ -40,14 +34,16 @@ export class WorkflowManager {
         Analyze the user's latest query and the conversation history.
         
         TASK:
-        1. "activeLocation": Identify the CURRENT city/cities. If the user asks a follow-up (e.g. "which is cheaper?", "what's the difference?"), you MUST identify the most recent city discussed in the history. Do NOT default to old cities like Paris if a newer city was discussed.
-        2. "isFollowUp": true if this query relies on the context of the previous turn.
-        3. "needsSync": true if new data is required.
-        4. "userProfileUpdate": Extract new preferences.
-        5. "reasoning": Explain your logic, specifically identifying the last city discussed.
+        1. "inScope": true if the query is related to Marriott hotels, travel, amenities, or attractions. false if the user is asking about jokes, weather, unrelated news, or non-Marriott topics.
+        2. "activeLocation": Identify the CURRENT city/cities. If follow-up, use most recent.
+        3. "isFollowUp": true if this query relies on previous context.
+        4. "needsSync": true if new data is required.
+        5. "userProfileUpdate": Extract new preferences.
+        6. "reasoning": Explain your logic.
         
         OUTPUT ONLY JSON:
         { 
+          "inScope": boolean,
           "activeLocation": "string", 
           "isFollowUp": boolean, 
           "needsSync": boolean, 
@@ -61,6 +57,13 @@ export class WorkflowManager {
     try {
       const jsonStr = reasoningResponse.match(/\{[\s\S]*\}/)?.[0] || reasoningResponse;
       plan = JSON.parse(jsonStr);
+
+      if (plan.inScope === false) {
+        return {
+          response: "I am here specifically to assist you with Marriott International properties and nearby attractions. How can I help you find your next Marriott stay?",
+          suggestions: ["Show me Marriotts in London", "What are the best Marriotts for families?", "Find a hotel in Dubai"],
+        };
+      }
     } catch (e) {
       plan = { activeLocation: "none", isFollowUp: false, needsSync: false, userProfileUpdate: { likes: [], dislikes: [] }, reasoning: "Fallback" };
     }
@@ -198,20 +201,4 @@ export class WorkflowManager {
     return { response: responseText, suggestions };
   }
 
-  private isMarriottRelated(query: string, history: any[]): boolean {
-    // If we have an active conversation, be very permissive
-    if (history.length > 0) {
-      const stopWords = ['joke', 'weather', 'news', 'stock', 'crypto', 'translate'];
-      const isIrrelevant = stopWords.some(w => query.toLowerCase().includes(w));
-      if (!isIrrelevant) return true;
-    }
-
-    const keywords = [
-      'marriott', 'hotel', 'resort', 'stay', 'room', 'booking', 'price', 'pricing', 'cost', 
-      'bonvoy', 'amenities', 'dining', 'restaurant', 'attraction', 'activity', 'activities', 
-      'paris', 'london', 'hawaii', 'maui', 'venice', 'kyoto', 'maldives', 'recommend', 
-      'show me', 'find', 'nearby', 'tourist', 'family'
-    ];
-    return keywords.some(k => query.toLowerCase().includes(k));
-  }
 }
