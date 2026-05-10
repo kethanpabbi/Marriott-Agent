@@ -81,6 +81,18 @@ export class HotelsAgent {
       'hawaii': [
         { name: "The Royal Hawaiian, a Luxury Collection Resort", location: "Waikiki, Honolulu", priceRange: "$700 - $2,500", description: "The iconic Pink Palace of the Pacific.", amenities: "Private Beach, Spa", restaurants: "Azure", activities: "Surfing, Luau", region: "Hawaii" },
         { name: "Westin Hapuna Beach Resort", location: "Kohala Coast, Big Island", priceRange: "$600 - $1,800", description: "Voted #1 beach in the USA.", amenities: "Golf, Infinity Pool", restaurants: "Meridia", activities: "Snorkeling", region: "Hawaii" }
+      ],
+      'mumbai': [
+        { name: "JW Marriott Mumbai Sahar", location: "IA Project Rd, Mumbai", priceRange: "$200 - $600", description: "Luxury hotel near Mumbai International Airport.", amenities: "Spa, Pool, Executive Lounge", restaurants: "JW Cafe, Romano's", activities: "City Tours", region: "Asia" },
+        { name: "The St. Regis Mumbai", location: "Senapati Bapat Marg, Mumbai", priceRange: "$250 - $800", description: "The tallest hotel tower in India, offering timeless luxury.", amenities: "Butler Service, Infinity Pool", restaurants: "By the Mekong, Yuuka", activities: "Luxury Shopping", region: "Asia" }
+      ],
+      'kyoto': [
+        { name: "The Ritz-Carlton, Kyoto", location: "Kamigyo Ward, Kyoto", priceRange: "$800 - $3,000", description: "Experience the ultimate in Japanese luxury along the Kamogawa River.", amenities: "Zen Garden, Spa, Pool", restaurants: "La Locanda, Mizuki", activities: "Tea Ceremony, Temple Tours", region: "Asia" }
+      ],
+      'delhi': [
+        { name: "JW Marriott Hotel New Delhi Aerocity", location: "Asset Area 4, Aerocity, Delhi", priceRange: "$200 - $550", description: "A premier five-star luxury hotel near the international airport.", amenities: "24-hour Spa, Outdoor Pool, Fitness Center", restaurants: "K3 Food Theatre, Adrift Kaya", activities: "Shopping at DLF Promenade, City Tours", region: "Asia" },
+        { name: "ITC Maurya, a Luxury Collection Hotel, New Delhi", location: "Diplomatic Enclave, New Delhi", priceRange: "$250 - $700", description: "Iconic luxury property known for hosting heads of state.", amenities: "Luxury Spa, Signature Pool, Butler Service", restaurants: "Bukhara, Dum Pukht", activities: "Historical Tours, Fine Dining", region: "Asia" },
+        { name: "Aloft New Delhi Aerocity", location: "Asset 5B, Aerocity, Delhi", priceRange: "$100 - $250", description: "Modern, tech-forward hotel with a vibrant urban atmosphere.", amenities: "W XYZ Bar, Re:charge Gym, Splash Pool", restaurants: "Nook", activities: "Nightlife, Airport Proximity", region: "Asia" }
       ]
     };
 
