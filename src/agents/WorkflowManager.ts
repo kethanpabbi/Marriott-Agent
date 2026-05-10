@@ -34,46 +34,35 @@ export class WorkflowManager {
     // 3. User Context Retrieval
     const user = await userAgent.getOrCreateUser(email);
 
-    // 4. Hotel Retrieval & Filtering
+    // 4. Smart Hotel Retrieval (History-Aware)
     let hotels = await hotelsAgent.searchHotels(query);
     
-    // Fallback: If no results, and it's a follow-up, get ALL hotels or recently discussed ones
-    const isFollowUp = ['attraction', 'dining', 'restaurant', 'price', 'pricing', 'room', 'cost', 'nearby', 'tell me', 'show me'].some(k => query.toLowerCase().includes(k));
-    
-    if (hotels.length === 0 && (isFollowUp || history.length > 0)) {
-       const locations = ['london', 'hawaii', 'maui', 'venice', 'kyoto', 'maldives', 'paris', 'oahu', 'honolulu'];
+    // If query yields nothing, search for the most recently active location
+    if (hotels.length === 0) {
+       const locations = ['london', 'hawaii', 'maui', 'venice', 'kyoto', 'maldives', 'paris', 'oahu', 'honolulu', 'mumbai'];
        
-       // 1. Check current query first
-       let mentionedLocation = locations.find(l => query.toLowerCase().includes(l));
+       // 1. Detect location in current query or history
+       let activeLocation = locations.find(l => query.toLowerCase().includes(l));
        
-       // 2. If not in query, find the MOST RECENT location mentioned in the WHOLE conversation history
-       if (!mentionedLocation) {
-         for (let i = history.length - 1; i >= 0; i--) {
-           const found = locations.find(l => history[i].content.toLowerCase().includes(l));
-           if (found) {
-             mentionedLocation = found;
-             break;
-           }
+       if (!activeLocation) {
+         // Check history in reverse
+         for (const msg of [...history].reverse()) {
+           activeLocation = locations.find(l => msg.content.toLowerCase().includes(l));
+           if (activeLocation) break;
          }
        }
        
-       if (mentionedLocation) {
-         // Force sync and retrieval
-         await hotelsAgent.syncLocation(mentionedLocation, scraperService);
-         hotels = await hotelsAgent.searchHotels(mentionedLocation);
+       if (activeLocation) {
+         await hotelsAgent.syncLocation(activeLocation, scraperService);
+         hotels = await hotelsAgent.searchHotels(activeLocation);
        } else {
-         // Last resort: Provide all properties to the AI
-         hotels = await hotelsAgent.searchHotels(""); 
+         // Fallback to all hotels
+         hotels = await hotelsAgent.searchHotels("");
        }
     }
     
-    // Filter by user dislikes
-    const filteredHotels = hotels.filter(h => {
-      return !user.dislikes.some(dislike => 
-        h.description.toLowerCase().includes(dislike.toLowerCase()) || 
-        h.amenities.toLowerCase().includes(dislike.toLowerCase())
-      );
-    });
+    // Ensure the AI has a balanced set of hotels (Prefer current context)
+    const filteredHotels = hotels.slice(0, 10);
 
     // 5. Generate Response & Suggestions using LLM
     const { response, suggestions } = await this.generateAIResponse(filteredHotels, query, user, history);
