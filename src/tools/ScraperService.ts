@@ -25,6 +25,11 @@ export class ScraperService {
         body: JSON.stringify({
           url: url,
           formats: ['markdown', 'json'],
+          waitFor: 5000, // Wait for JS to render
+          actions: [
+            { type: "scroll", direction: "down" },
+            { type: "wait", duration: 1000 }
+          ],
           // Example schema for extraction
           extract: {
             schema: {
