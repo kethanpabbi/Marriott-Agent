@@ -81,6 +81,7 @@ export class HotelsAgent {
 
     // OBJECTIVE COVERAGE CHECK: See if our local list is actually complete
     let needsDiscovery = existing.length === 0;
+    let officialCount = 0;
     
     if (existing.length > 0) {
       console.log(`📊 Local coverage for ${location}: ${existing.length} properties.`);
@@ -89,7 +90,7 @@ export class HotelsAgent {
         const countSearch = await scraper.search(`how many Marriott hotels in ${location} official count 2026`);
         const countPrompt = `Based on these snippets, what is the official count of Marriott properties in ${location}? Return ONLY the number. \n${countSearch.map((s: any) => s.snippet).join('\n')}`;
         const countResponse = await llmService.generateResponse([{ role: 'user', content: countPrompt }]);
-        const officialCount = parseInt(countResponse.match(/\d+/)?.[0] || "0");
+        officialCount = parseInt(countResponse.match(/\d+/)?.[0] || "0");
         
         if (officialCount > existing.length) {
           console.log(`⚠️ Portfolio incomplete! Local: ${existing.length} vs Official: ${officialCount}. Triggering Deep-Sync.`);
@@ -138,11 +139,11 @@ export class HotelsAgent {
       ${deepScrapeContent.slice(0, 25000)}
 
       TASK:
-      1. Extract EVERY unique Marriott property. YOU MUST FIND AT LEAST 7 PROPERTIES if they exist.
-      2. BRAND CHECK: Only include official Marriott brands: Ritz-Carlton, St. Regis, JW Marriott, W Hotels, Edition, Autograph Collection (e.g. The Shelbourne, College Green), Renaissance, Marriott, Sheraton, Delta, Westin, Le Méridien, Gaylord, Courtyard, Four Points, SpringHill Suites, Protea, Fairfield, AC Hotels, Aloft, Moxy, Residence Inn, TownePlace Suites, Element.
-      3. REBRANDING CHECK: If a hotel was rebranded (e.g. Westin Dublin -> College Green Hotel), use the NEW NAME from the text.
-      4. IGNORE competitor hotels like Maldron, Hilton, or IHG even if they appear in the text.
-      5. RATING: Provide the ACTUAL rating found or return "N/A".
+      1. Extract EVERY unique Marriott property. According to official records, there should be approximately ${needsDiscovery && typeof officialCount !== 'undefined' ? officialCount : '7+'} properties in this area.
+      2. BRAND CHECK: Only include official Marriott brands (Ritz-Carlton, St. Regis, JW Marriott, W Hotels, Edition, Autograph Collection, Renaissance, Marriott, Sheraton, Delta, Westin, Le Méridien, Gaylord, Courtyard, Four Points, SpringHill Suites, Protea, Fairfield, AC Hotels, Aloft, Moxy, Residence Inn, TownePlace Suites, Element).
+      3. REBRANDING CHECK: Use current 2026 names (e.g. Westin Dublin is now College Green Hotel).
+      4. IGNORE competitors (Maldron, Hilton, IHG).
+      5. RATING: Provide actual rating found or "N/A".
       
       OUTPUT ONLY JSON. NO PREAMBLE.
       { "hotels": [{ "name": string, "price": string, "amenities": string[], "description": string, "rating": string | number }] }
