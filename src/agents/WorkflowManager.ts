@@ -85,7 +85,7 @@ export class WorkflowManager {
     
     if (plan.needsSync && locations.length > 0) {
       for (const loc of locations) {
-        await hotelsAgent.syncLocation(loc, scraperService);
+        await hotelsAgent.syncLocation(loc, scraperService, llmService);
       }
     }
 
