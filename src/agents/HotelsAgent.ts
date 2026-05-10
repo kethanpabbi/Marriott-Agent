@@ -105,6 +105,11 @@ export class HotelsAgent {
         { name: "JW Marriott Hotel New Delhi Aerocity", location: "Asset Area 4, Aerocity, Delhi", priceRange: "$200 - $550", description: "A premier five-star luxury hotel near the international airport.", amenities: "24-hour Spa, Outdoor Pool, Fitness Center", restaurants: "K3 Food Theatre, Adrift Kaya", activities: "Shopping at DLF Promenade, City Tours", region: "Asia", rating: 4.8 },
         { name: "Aloft New Delhi Aerocity", location: "Asset 5B, Aerocity, Delhi", priceRange: "$100 - $250", description: "Modern, tech-forward hotel with a vibrant urban atmosphere.", amenities: "W XYZ Bar, Re:charge Gym, Splash Pool", restaurants: "Nook", activities: "Nightlife, Airport Proximity", region: "Asia", rating: 4.4 }
       ],
+      'bangalore': [
+        { name: "JW Marriott Hotel Bengaluru", location: "Lavelle Road, Bengaluru", priceRange: "$250 - $600", description: "A five-star luxury hotel overlooking Cubbon Park.", amenities: "Spa by JW, Infinity Pool, Fitness Center", restaurants: "JW Kitchen, Alba, Spice Terrace", activities: "Cubbon Park Walks, Shopping at UB City", region: "Asia", rating: 4.8 },
+        { name: "The Ritz-Carlton, Bangalore", location: "Residency Road, Bengaluru", priceRange: "$300 - $700", description: "An oasis of luxury in the heart of the city.", amenities: "Ritz-Carlton Spa, Rooftop Bar, Outdoor Pool", restaurants: "The Lantern, Bang, Market", activities: "City Discovery, Luxury Shopping", region: "Asia", rating: 4.9 },
+        { name: "Sheraton Grand Bangalore Hotel at Brigade Gateway", location: "Malleswaram-Rajajinagar, Bengaluru", priceRange: "$200 - $500", description: "Modern luxury near the World Trade Center.", amenities: "Shine Spa, Infinity Pool", restaurants: "Feast, Bene", activities: "ISCKON Temple visit", region: "Asia", rating: 4.7 }
+      ],
       'kyoto': [
         { name: "The Ritz-Carlton, Kyoto", location: "Kamigyo Ward, Kyoto", priceRange: "$800 - $3,000", description: "Experience the ultimate in Japanese luxury along the Kamogawa River.", amenities: "Zen Garden, Spa, Pool", restaurants: "La Locanda, Mizuki", activities: "Tea Ceremony, Temple Tours", region: "Asia", rating: 4.9 }
       ]
@@ -117,18 +122,20 @@ export class HotelsAgent {
       try {
         const realExtracted = await scraper.scrapeProperty(`https://www.marriott.com/hotel-search/${location.toLowerCase()}.residences/`);
         
-        if (realExtracted && realExtracted.data) {
-          const hotel = realExtracted.data;
+        // Handle both Firecrawl's { data: ... } format and our mock { name: ... } format
+        const hotelData = realExtracted?.data || (realExtracted?.name ? realExtracted : null);
+        
+        if (hotelData) {
           properties = [{
-            name: hotel.name || `Marriott ${location}`,
+            name: hotelData.name || `Marriott ${location}`,
             location: `${location}`,
-            priceRange: hotel.price || "$300 - $800",
-            description: hotel.description || `Luxury Marriott property in ${location}.`,
-            amenities: Array.isArray(hotel.amenities) ? hotel.amenities.join(', ') : "Pool, WiFi, Spa",
+            priceRange: hotelData.price || "$300 - $800",
+            description: hotelData.description || `Luxury Marriott property in ${location}.`,
+            amenities: Array.isArray(hotelData.amenities) ? hotelData.amenities.join(', ') : "Pool, WiFi, Spa",
             restaurants: "Signature Dining",
             activities: "City Discovery",
             region: "Global Discovery",
-            rating: hotel.rating ? parseFloat(hotel.rating) : 4.5
+            rating: hotelData.rating ? parseFloat(hotelData.rating) : 4.5
           }];
         }
       } catch (err) {
