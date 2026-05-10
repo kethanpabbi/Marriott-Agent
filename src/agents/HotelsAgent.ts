@@ -86,32 +86,36 @@ export class HotelsAgent {
 
     console.log(`🌐 No local data for ${location}. Attempting autonomous discovery...`);
     
-    // 1. REAL-TIME SEARCH: Find the official Marriott destination page
-    const searchResults = await scraper.search(`official Marriott Bonvoy hotels directory in ${location}`);
-    
-    // Pick the most likely Marriott official URL (usually the one containing 'marriott.com' and 'destinations')
-    const bestUrl = searchResults.find((r: any) => r.url.includes('marriott.com') && r.url.includes('destinations'))?.url 
-                 || searchResults[0]?.url;
+    // 1. REAL-TIME SEARCH: Find multiple directory leads
+    const searchResults = await scraper.search(`official list of Marriott Bonvoy hotels in ${location} Ireland`);
+    const potentialUrls = searchResults
+      .map((r: any) => r.url)
+      .filter((u: string) => u.includes('marriott.com'))
+      .slice(0, 3); // Try top 3 Marriott-specific leads
 
     let deepScrapeContent = "";
-    if (bestUrl) {
-      console.log(`🔍 Deep-scraping verified directory: ${bestUrl}`);
-      const scrapeResult = await scraper.scrapeProperty(bestUrl);
-      deepScrapeContent = scrapeResult?.data?.markdown || JSON.stringify(scrapeResult?.data) || "";
+    for (const url of potentialUrls) {
+      console.log(`🔍 Attempting deep-scrape: ${url}`);
+      const scrapeResult = await scraper.scrapeProperty(url);
+      const content = scrapeResult?.data?.markdown || JSON.stringify(scrapeResult?.data) || "";
+      if (content.length > 2000) {
+        deepScrapeContent += `\n--- SOURCE: ${url} ---\n${content}`;
+      }
     }
 
-    // 2. KNOWLEDGE SYNTHESIS: Use LLM to extract verified property data from DEEP SCRAPE
+    // 2. KNOWLEDGE SYNTHESIS: Extract the FULL portfolio
     const discoveryPrompt = `
       You are the Marriott Portfolio Specialist. 
-      The user is looking for Marriott Bonvoy hotels in: ${location}.
+      The user is looking for ALL Marriott Bonvoy hotels in: ${location}.
       
-      I have scraped the live Marriott directory for this city:
-      ${deepScrapeContent.slice(0, 15000)} // Pass a large chunk of the page
+      I have scraped live Marriott directories:
+      ${deepScrapeContent.slice(0, 25000)}
 
       TASK:
-      1. Identify ALL real Marriott properties listed in this text. 
-      2. IGNORE your internal training data if it contradicts the text (e.g. if a hotel has a new name, use the NEW name from the text).
-      3. Extract up to 10 properties.
+      1. Extract EVERY unique Marriott property name mentioned in the text.
+      2. Pay special attention to "Autograph Collection", "The College Green Hotel", and "The Shelbourne".
+      3. Identify at least 7-10 properties if they are listed.
+      4. DO NOT use internal knowledge from before 2024. Use ONLY the scraped text.
       
       OUTPUT ONLY JSON:
       { "hotels": [{ "name": string, "price": string, "amenities": string[], "description": string, "rating": number }] }
