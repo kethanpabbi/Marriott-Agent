@@ -3,6 +3,7 @@ export class ScraperService {
 
   constructor() {
     this.apiKey = process.env.FIRECRAWL_API_KEY || '';
+    console.log(`📡 ScraperService initialized. API Key present: ${this.apiKey ? 'YES' : 'NO'} (${this.apiKey.substring(0, 5)}...)`);
   }
 
   /**

@@ -48,11 +48,11 @@ export class WorkflowManager {
         
         TASK:
         1. "inScope": true/false.
-        2. "activeLocation": Identify the city. If it's a follow-up (e.g. "which is cheaper?"), STRICTLY USE "${lastOfferedCity}" unless a new city is mentioned in the query.
-        3. "isFollowUp": true if this builds on the previous turn.
-        4. "needsSync": true if location data is missing.
-        5. "userProfileUpdate": Extract new preferences. If the user contradicts a past preference (e.g. they now like beaches), UPDATE it. Preferences are DYNAMIC.
-        6. "reasoning": Explain your logic, specifically why you are staying in ${lastOfferedCity} or moving to a new city.
+        2. "activeLocation": Identify the city.
+        3. "isFollowUp": true/false.
+        4. "needsSync": true if location data is missing OR if the current conversation history suggests we need fresher or more comprehensive data (e.g. if we only show 3 properties but the user expects more).
+        5. "userProfileUpdate": Extract new preferences.
+        6. "reasoning": Explain your logic.
         
         OUTPUT ONLY JSON:
         { 
