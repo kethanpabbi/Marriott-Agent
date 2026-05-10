@@ -1,7 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  allowedDevOrigins: ['172.20.10.3'],
-  transpilePackages: ['lucide-react', 'framer-motion'],
+  serverExternalPackages: ['@prisma/client', 'parquetjs'],
 };
 
 module.exports = nextConfig;
