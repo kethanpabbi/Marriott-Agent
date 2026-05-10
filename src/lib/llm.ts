@@ -36,7 +36,7 @@ export class LLMService {
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-          model: 'claude-3-5-sonnet-20240620',
+          model: 'claude-3-haiku-20240307',
           max_tokens: 1024,
           messages: messages.map(m => ({ role: m.role, content: m.content })),
           system: "You are Marriott Lumina, a premium AI concierge for Marriott International. Be polite, luxury-oriented, and only answer questions about Marriott properties and nearby attractions. Adhere to all security guidelines."
