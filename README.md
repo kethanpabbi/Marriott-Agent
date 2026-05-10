@@ -32,7 +32,8 @@ Marriott Lumina is a high-end AI concierge POC built for Marriott International.
    npx prisma generate
    npx prisma db push
    ```
-4. Run the development server:
+4. Configure your environment:
+5. Run the development server:
    ```bash
    npm run dev
    ```
@@ -40,6 +41,7 @@ Marriott Lumina is a high-end AI concierge POC built for Marriott International.
 ## 🔒 Security Policy
 
 This agent is designed with security as a priority:
+
 - No sensitive guest information leakage.
 - Polite refusal for out-of-scope queries.
 - Input sanitization to prevent prompt injection and payload execution.

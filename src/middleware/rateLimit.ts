@@ -5,7 +5,7 @@ const LIMIT = 50; // Max requests per hour
 const WINDOW = 3600000; // 1 hour in milliseconds
 
 export function rateLimit(req: NextRequest) {
-  const ip = req.ip || req.headers.get('x-forwarded-for') || 'anonymous';
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0] || 'anonymous';
   const now = Date.now();
   
   const record = rateLimitMap.get(ip) || { count: 0, lastReset: now };
