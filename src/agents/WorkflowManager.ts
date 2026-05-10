@@ -32,27 +32,25 @@ export class WorkflowManager {
     const user = await userAgent.getOrCreateUser(email);
     const history = await userAgent.getChatHistory(email);
 
-    // 4. Determine Context (is this a follow-up?)
-    let hotels: any[] = [];
-    const isFollowUp = ['attraction', 'dining', 'restaurant', 'price', 'pricing', 'room', 'cost', 'nearby'].some(k => query.toLowerCase().includes(k));
+    // 4. Hotel Retrieval & Filtering
+    let hotels = await hotelsAgent.searchHotels(query);
     
-    if (isFollowUp && history.length > 0) {
-      // Find the last assistant message that mentioned a hotel
-      const lastAssistantMessage = [...history].reverse().find(m => m.role === 'assistant' && m.content.includes("Marriott"));
-      if (lastAssistantMessage) {
-         // Try to find hotels based on the last context
-         // For POC, we'll just search for hotels again but with a broader context if needed
-         hotels = await hotelsAgent.searchHotels(query);
-         if (hotels.length === 0) {
-           // Fallback: use the previously found hotels by searching for the last query
-           const lastUserQuery = [...history].reverse().find(m => m.role === 'user')?.content || "";
-           hotels = await hotelsAgent.searchHotels(lastUserQuery);
-         }
-      } else {
-        hotels = await hotelsAgent.searchHotels(query);
-      }
-    } else {
-      hotels = await hotelsAgent.searchHotels(query);
+    // Fallback: If no results, and it's a follow-up, get ALL hotels or recently discussed ones
+    const isFollowUp = ['attraction', 'dining', 'restaurant', 'price', 'pricing', 'room', 'cost', 'nearby', 'tell me', 'show me'].some(k => query.toLowerCase().includes(k));
+    
+    if (hotels.length === 0 && (isFollowUp || history.length > 0)) {
+       // Search for recently mentioned locations in history
+       const locations = ['paris', 'london', 'hawaii', 'maui', 'venice', 'kyoto', 'maldives'];
+       const mentionedLocation = locations.find(l => 
+         history.some(m => m.content.toLowerCase().includes(l))
+       );
+       
+       if (mentionedLocation) {
+         hotels = await hotelsAgent.searchHotels(mentionedLocation);
+       } else {
+         // Last resort: Get all open hotels so the LLM can pick
+         hotels = await hotelsAgent.searchHotels(""); 
+       }
     }
     
     // Filter by user dislikes

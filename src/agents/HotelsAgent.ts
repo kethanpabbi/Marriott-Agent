@@ -15,12 +15,14 @@ export class HotelsAgent {
 
     return await prisma.hotel.findMany({
       where: {
-        OR: [
-          { name: { contains: cleanedQuery } },
-          { location: { contains: cleanedQuery } },
-          { region: { contains: cleanedQuery } },
-          { description: { contains: cleanedQuery } },
-        ],
+        ...(cleanedQuery ? {
+          OR: [
+            { name: { contains: cleanedQuery } },
+            { location: { contains: cleanedQuery } },
+            { region: { contains: cleanedQuery } },
+            { description: { contains: cleanedQuery } },
+          ]
+        } : {}),
         status: { not: "Closed" },
       },
       include: {
