@@ -79,8 +79,30 @@ export class HotelsAgent {
       }
     });
 
+    // OBJECTIVE COVERAGE CHECK: See if our local list is actually complete
+    let needsDiscovery = existing.length === 0;
+    
     if (existing.length > 0) {
-      console.log(`✅ Found ${existing.length} properties for ${location} in local database.`);
+      console.log(`📊 Local coverage for ${location}: ${existing.length} properties.`);
+      // Perform a quick "sanity check" to see if we're missing rebranded properties
+      try {
+        const countSearch = await scraper.search(`how many Marriott hotels in ${location} official count 2026`);
+        const countPrompt = `Based on these snippets, what is the official count of Marriott properties in ${location}? Return ONLY the number. \n${countSearch.map((s: any) => s.snippet).join('\n')}`;
+        const countResponse = await llmService.generateResponse([{ role: 'user', content: countPrompt }]);
+        const officialCount = parseInt(countResponse.match(/\d+/)?.[0] || "0");
+        
+        if (officialCount > existing.length) {
+          console.log(`⚠️ Portfolio incomplete! Local: ${existing.length} vs Official: ${officialCount}. Triggering Deep-Sync.`);
+          needsDiscovery = true;
+        }
+      } catch (e) {
+        // If count check fails, trust local only if it looks healthy (at least 5 for big cities)
+        needsDiscovery = existing.length < 5;
+      }
+    }
+
+    if (!needsDiscovery) {
+      console.log(`✅ Local portfolio for ${location} is verified and comprehensive.`);
       return true;
     }
 
