@@ -70,6 +70,36 @@ export class HotelsAgent {
   async syncLocation(location: string, scraper: any, llmService: any) {
     console.log(`🚀 Checking local records for ${location}...`);
     
+    // 0. PURGE INVALID: Ensure we don't have hallucinations or rebranded ghosts
+    await prisma.hotel.deleteMany({
+      where: {
+        OR: [
+          { name: { contains: "Maldron" } },
+          { name: { contains: "Tara Towers" } },
+          { name: { contains: "Westin Dublin" } }, // Force removal of old name to allow rebranding
+          { NOT: {
+              OR: [
+                { name: { contains: "Marriott" } },
+                { name: { contains: "Ritz" } },
+                { name: { contains: "JW" } },
+                { name: { contains: "W Hotel" } },
+                { name: { contains: "Autograph" } },
+                { name: { contains: "College Green" } }, // Specifically for Dublin
+                { name: { contains: "Shelbourne" } },
+                { name: { contains: "Sheraton" } },
+                { name: { contains: "Westin" } },
+                { name: { contains: "Aloft" } },
+                { name: { contains: "Moxy" } },
+                { name: { contains: "Renaissance" } },
+                { name: { contains: "Courtyard" } },
+                { name: { contains: "Fairfield" } }
+              ]
+            }
+          }
+        ]
+      }
+    });
+
     const existing = await prisma.hotel.findMany({
       where: {
         OR: [
@@ -79,25 +109,23 @@ export class HotelsAgent {
       }
     });
 
-    // OBJECTIVE COVERAGE CHECK: See if our local list is actually complete
-    let needsDiscovery = existing.length === 0;
+    // OBJECTIVE COVERAGE CHECK: Hardened for 2026
+    let needsDiscovery = existing.length < 5; // Major cities should always have > 5
     let officialCount = 0;
     
     if (existing.length > 0) {
       console.log(`📊 Local coverage for ${location}: ${existing.length} properties.`);
-      // Perform a quick "sanity check" to see if we're missing rebranded properties
       try {
-        const countSearch = await scraper.search(`how many Marriott hotels in ${location} official count 2026`);
-        const countPrompt = `Based on these snippets, what is the official count of Marriott properties in ${location}? Return ONLY the number. \n${countSearch.map((s: any) => s.snippet).join('\n')}`;
+        const countSearch = await scraper.search(`total number of official Marriott Bonvoy hotels in ${location} Ireland 2026`);
+        const countPrompt = `Based on these snippets, what is the TOTAL count of Marriott properties in ${location}? Return ONLY the number. \n${countSearch.map((s: any) => s.snippet).join('\n')}`;
         const countResponse = await llmService.generateResponse([{ role: 'user', content: countPrompt }]);
         officialCount = parseInt(countResponse.match(/\d+/)?.[0] || "0");
         
-        if (officialCount > existing.length) {
+        if (officialCount > existing.length || officialCount > 6) {
           console.log(`⚠️ Portfolio incomplete! Local: ${existing.length} vs Official: ${officialCount}. Triggering Deep-Sync.`);
           needsDiscovery = true;
         }
       } catch (e) {
-        // If count check fails, trust local only if it looks healthy (at least 5 for big cities)
         needsDiscovery = existing.length < 5;
       }
     }
