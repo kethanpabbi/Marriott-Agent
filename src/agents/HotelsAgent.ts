@@ -86,15 +86,25 @@ export class HotelsAgent {
 
     console.log(`🌐 No local data for ${location}. Attempting autonomous discovery...`);
     
-    // 1. KNOWLEDGE DISCOVERY: Ask the LLM to identify REAL Marriott properties in this city
+    // 1. REAL-TIME SEARCH: Find the LATEST Marriott properties via live web search
+    const searchResults = await scraper.search(`official Marriott Bonvoy hotels in ${location}`);
+    const searchContext = searchResults.map((r: any) => `${r.title}: ${r.url}`).join('\n');
+
+    // 2. KNOWLEDGE SYNTHESIS: Use LLM to extract verified property data from search results
     const discoveryPrompt = `
       You are the Marriott Portfolio Specialist. 
       The user is looking for Marriott Bonvoy hotels in: ${location}.
-      Provide a list of up to 3 REAL Marriott properties in this city.
-      For each, provide: name, approximate price range, and 3 key amenities.
+      
+      I found these search results:
+      ${searchContext}
+
+      TASK:
+      Identify the REAL, CURRENT Marriott properties in this city. 
+      NOTE: Be aware of recent rebrandings (e.g. Westin Dublin is now College Green Hotel).
+      Provide up to 7 properties if they exist.
       
       OUTPUT ONLY JSON:
-      { "hotels": [{ "name": string, "price": string, "amenities": string[] }] }
+      { "hotels": [{ "name": string, "price": string, "amenities": string[], "description": string, "rating": number }] }
     `;
 
     try {
@@ -103,7 +113,7 @@ export class HotelsAgent {
       const discovered = JSON.parse(jsonStr);
 
       if (discovered.hotels && discovered.hotels.length > 0) {
-        console.log(`🧠 Discovered ${discovered.hotels.length} verified properties for ${location} via knowledge base.`);
+        console.log(`🧠 Discovered ${discovered.hotels.length} verified properties for ${location} via Real-Time Search.`);
         
         for (const h of discovered.hotels) {
           await prisma.hotel.upsert({
@@ -111,23 +121,23 @@ export class HotelsAgent {
             update: {
               location: `${location}`,
               priceRange: h.price,
-              description: `A premium Marriott Bonvoy property in ${location} discovered through autonomous intelligence.`,
+              description: h.description || `A premium Marriott Bonvoy property in ${location} discovered through autonomous search.`,
               amenities: h.amenities.join(', '),
               restaurants: "Marriott Signature Dining",
               activities: `Cultural discovery in ${location}`,
               region: "Global Discovery",
-              rating: 4.5 + (Math.random() * 0.4) // Dynamic rating
+              rating: h.rating || (4.5 + (Math.random() * 0.4))
             },
             create: {
               name: h.name,
               location: `${location}`,
               priceRange: h.price,
-              description: `A premium Marriott Bonvoy property in ${location} discovered through autonomous intelligence.`,
+              description: h.description || `A premium Marriott Bonvoy property in ${location} discovered through autonomous search.`,
               amenities: h.amenities.join(', '),
               restaurants: "Marriott Signature Dining",
               activities: `Cultural discovery in ${location}`,
               region: "Global Discovery",
-              rating: 4.5 + (Math.random() * 0.4)
+              rating: h.rating || (4.5 + (Math.random() * 0.4))
             }
           });
         }

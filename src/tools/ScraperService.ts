@@ -46,6 +46,38 @@ export class ScraperService {
     }
   }
 
+  /**
+   * Searches the web for a query and returns URLs.
+   */
+  async search(query: string) {
+    if (!this.apiKey || this.apiKey === 'your_firecrawl_api_key_here') {
+      console.warn("Firecrawl API key not configured. Returning empty search results.");
+      return [];
+    }
+
+    try {
+      const response = await fetch('https://api.firecrawl.dev/v1/search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.apiKey}`
+        },
+        body: JSON.stringify({
+          query: query,
+          searchOptions: {
+            limit: 5
+          }
+        })
+      });
+
+      const data = await response.json();
+      return data.data || [];
+    } catch (error) {
+      console.error('Firecrawl Search Error:', error);
+      return [];
+    }
+  }
+
   private getMockPropertyData(url: string) {
     return {
       name: "Mock Marriott Property",
