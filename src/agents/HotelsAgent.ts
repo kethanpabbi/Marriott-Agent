@@ -150,12 +150,13 @@ export class HotelsAgent {
                 Extract the official Marriott rating (out of 5.0) for "${h.name}" from these snippets:
                 ${ratingSearch.map((s: any) => s.title + ": " + s.snippet).join('\n')}
                 
-                OUTPUT ONLY THE NUMBER (e.g. 4.8). If truly not found, return 4.5 as a conservative Marriott average.
+                OUTPUT ONLY THE NUMBER (e.g. 4.8). If truly not found, return "NA".
               `;
               const ratingResponse = await llmService.generateResponse([{ role: 'user', content: ratingPrompt }]);
-              actualRating = parseFloat(ratingResponse.match(/\d+\.\d+/)?.[0] || "4.5");
+              const matched = ratingResponse.match(/\d+\.\d+/);
+              actualRating = matched ? parseFloat(matched[0]) : 0.0;
             } catch (e) {
-              actualRating = 4.5; // Fallback to premium average
+              actualRating = 0.0;
             }
           }
 
