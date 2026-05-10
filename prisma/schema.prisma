@@ -1,0 +1,57 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id            String   @id // Email address
+  name          String?
+  likes         String?  // Stringified JSON or comma-separated
+  dislikes      String?  // Stringified JSON or comma-separated
+  interactions  Int      @default(0)
+  lastSeen      DateTime @default(now())
+  securityFlags String?  // Context on exploit attempts
+  isFlagged     Boolean  @default(false)
+  chatHistory   Message[]
+}
+
+model Hotel {
+  id            String   @id @default(cuid())
+  name          String
+  location      String
+  region        String
+  description   String
+  priceRange    String
+  amenities     String   // Comma-separated
+  restaurants   String   // Comma-separated
+  activities    String   // Comma-separated
+  status        String   @default("Open") // Open, Renovating, Closed
+  rating        Float    @default(0.0)
+  lastUpdated   DateTime @updatedAt
+  nearbyAttractions Attraction[]
+}
+
+model Attraction {
+  id          String @id @default(cuid())
+  name        String
+  description String
+  distance    String
+  hotel       Hotel  @relation(fields: [hotelId], references: [id])
+  hotelId     String
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  role      String   // user or assistant
+  content   String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+}

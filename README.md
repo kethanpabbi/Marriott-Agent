@@ -1,36 +1,48 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Marriott Lumina AI Agent
 
-## Getting Started
+Marriott Lumina is a high-end AI concierge POC built for Marriott International. It leverages the **WAT (Workflow, Agent, Tools)** framework to provide guests with a seamless, secure, and personalized experience.
 
-First, run the development server:
+## ✨ Features
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- **Multi-Agent Architecture**:
+  - **User Agent**: Manages user memory, personalization, and security monitoring.
+  - **Hotels Agent**: Handles property data retrieval, consistency checks, and availability.
+- **WAT Framework**: Structured workflows that ensure polite, scoped, and interactive responses.
+- **Security & Privacy**: Built-in prompt hardening, rate limiting, and scope enforcement (Marriott properties only).
+- **Interactive Experience**: Premium UI with suggested questions and dynamic hotel information cards.
+- **Data Lake Ready**: Session and hotel data exported to Parquet files for easy ingestion and analysis.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 🛠 Tech Stack
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- **Frontend**: Next.js 15+, React, Framer Motion, Vanilla CSS (Premium Glassmorphism).
+- **Backend**: Next.js API Routes (Serverless).
+- **Database**: Prisma with SQLite (for POC portability).
+- **Intelligence**: Integrated with Claude API / Ollama.
+- **Tools**: Firecrawl (Scraping), ParquetJS (Data Export).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 🚀 Getting Started
 
-## Learn More
+1. Clone the repository.
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Setup the database:
+   ```bash
+   npx prisma generate
+   npx prisma db push
+   ```
+4. Run the development server:
+   ```bash
+   npm run dev
+   ```
 
-To learn more about Next.js, take a look at the following resources:
+## 🔒 Security Policy
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+This agent is designed with security as a priority:
+- No sensitive guest information leakage.
+- Polite refusal for out-of-scope queries.
+- Input sanitization to prevent prompt injection and payload execution.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+Built as a POC for Marriott International.
