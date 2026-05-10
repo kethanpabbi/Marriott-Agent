@@ -108,10 +108,24 @@ export default function ChatInterface() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
                 <div className={msg.role === 'user' ? 'bubble bubble-user' : 'bubble bubble-ai'}>
                   {msg.content.split('\n').map((line, i) => {
-                    // Simple bolding
-                    const formatted = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                    let formatted = line;
+                    
+                    // Horizontal rules
+                    if (formatted.trim() === '---') {
+                      return <hr key={i} className="markdown-rule" />;
+                    }
+                    
+                    // Headings (any number of #)
+                    if (formatted.startsWith('#')) {
+                      const text = formatted.replace(/^#+\s*/, '');
+                      return <span key={i} className="markdown-heading">{text}</span>;
+                    }
+
+                    // Bold text
+                    formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                    
                     return (
-                      <p key={i} dangerouslySetInnerHTML={{ __html: formatted }} style={{ marginBottom: i === msg.content.split('\n').length - 1 ? 0 : '8px' }} />
+                      <p key={i} dangerouslySetInnerHTML={{ __html: formatted }} style={{ marginBottom: '4px' }} />
                     );
                   })}
                 </div>

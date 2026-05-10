@@ -23,16 +23,16 @@ export class WorkflowManager {
     }
 
     // 2. Scope Enforcement
-    if (!this.isMarriottRelated(query)) {
+    const history = await userAgent.getChatHistory(email);
+    if (!this.isMarriottRelated(query, history)) {
       return {
         response: "I am here specifically to assist you with Marriott International properties and nearby attractions. How can I help you find your next Marriott stay?",
         suggestions: ["Show me Marriotts in London", "What are the best Marriotts for families?", "Tell me about Marriott activities in Hawaii"],
       };
     }
 
-    // 3. User Context & History Retrieval
+    // 3. User Context Retrieval
     const user = await userAgent.getOrCreateUser(email);
-    const history = await userAgent.getChatHistory(email);
 
     // 4. Hotel Retrieval & Filtering
     let hotels = await hotelsAgent.searchHotels(query);
@@ -84,8 +84,20 @@ export class WorkflowManager {
     };
   }
 
-  private isMarriottRelated(query: string): boolean {
-    const keywords = ['marriott', 'hotel', 'room', 'stay', 'booking', 'amenities', 'attraction', 'tourist', 'resort', 'bonvoy'];
+  private isMarriottRelated(query: string, history: any[]): boolean {
+    // If we have an active conversation, be very permissive
+    if (history.length > 0) {
+      const stopWords = ['joke', 'weather', 'news', 'stock', 'crypto', 'translate'];
+      const isIrrelevant = stopWords.some(w => query.toLowerCase().includes(w));
+      if (!isIrrelevant) return true;
+    }
+
+    const keywords = [
+      'marriott', 'hotel', 'resort', 'stay', 'room', 'booking', 'price', 'pricing', 'cost', 
+      'bonvoy', 'amenities', 'dining', 'restaurant', 'attraction', 'activity', 'activities', 
+      'paris', 'london', 'hawaii', 'maui', 'venice', 'kyoto', 'maldives', 'recommend', 
+      'show me', 'find', 'nearby', 'tourist', 'family'
+    ];
     return keywords.some(k => query.toLowerCase().includes(k));
   }
 

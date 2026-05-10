@@ -136,6 +136,21 @@ body {
   border-top-right-radius: 4px;
 }
 
+.markdown-heading {
+  color: var(--accent);
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-top: 12px;
+  margin-bottom: 8px;
+  display: block;
+}
+
+.markdown-rule {
+  border: 0;
+  border-top: 1px solid rgba(212, 175, 55, 0.3);
+  margin: 12px 0;
+}
+
 .suggestions {
   display: flex;
   flex-wrap: wrap;
