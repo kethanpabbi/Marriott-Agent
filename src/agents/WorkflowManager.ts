@@ -40,11 +40,11 @@ export class WorkflowManager {
         Analyze the user's latest query and the conversation history.
         
         TASK:
-        1. "activeLocation": The city/cities mentioned. If multiple, separate with commas (e.g. "Chennai, Bangalore").
-        2. "isFollowUp": Is this a continuation of a previous hotel-specific question?
-        3. "needsSync": true if the location isn't in history or if deeper details are needed.
-        4. "userProfileUpdate": Extract any NEW likes or dislikes mentioned (e.g. "I love spas", "I hate beaches").
-        5. "reasoning": Your step-by-step logic.
+        1. "activeLocation": Identify the CURRENT city/cities. If the user asks a follow-up (e.g. "which is cheaper?"), prioritize the MOST RECENT city discussed in the history.
+        2. "isFollowUp": true if this query relies on the context of the previous turn.
+        3. "needsSync": true if new data is required.
+        4. "userProfileUpdate": Extract new preferences.
+        5. "reasoning": Your logic, explaining why you chose the activeLocation (mentioning the most recent relevant city).
         
         OUTPUT ONLY JSON:
         { 
