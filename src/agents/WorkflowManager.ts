@@ -42,7 +42,7 @@ export class WorkflowManager {
     Recent History: ${history.slice(-3).map(m => `[${m.role}] ${m.content}`).join(' | ')}
     
     TASK:
-    1. Determine the active location/destination (e.g., "mumbai", "paris", "none").
+    1. Determine the active location(s). If multiple (e.g. comparing cities), return them as a comma-separated list (e.g., "mumbai, bangalore").
     2. Determine if this is a follow-up to the previous turn.
     3. Decide if we need to sync new data via Firecrawl (only for new locations or if info is missing).
     
@@ -68,17 +68,15 @@ export class WorkflowManager {
 
     // 5. Execution based on Plan
     let hotels: any[] = [];
+    const locations = plan.activeLocation ? plan.activeLocation.split(',').map((l: string) => l.trim().toLowerCase()) : [];
+
     if (plan.activeLocation && plan.activeLocation !== "none") {
-      if (plan.needsSync) {
-        await hotelsAgent.syncLocation(plan.activeLocation, scraperService);
-      }
-      hotels = await hotelsAgent.searchHotels(plan.activeLocation);
-    } else if (plan.isFollowUp) {
-      // Try to find the most recent location in history as a last resort
-      const locations = ['london', 'hawaii', 'paris', 'mumbai', 'kyoto', 'venice'];
-      const lastLoc = [...history].reverse().map(m => locations.find(l => m.content.toLowerCase().includes(l))).find(l => !!l);
-      if (lastLoc) {
-        hotels = await hotelsAgent.searchHotels(lastLoc);
+      for (const loc of locations) {
+        if (plan.needsSync) {
+          await hotelsAgent.syncLocation(loc, scraperService);
+        }
+        const locHotels = await hotelsAgent.searchHotels(loc);
+        hotels = [...hotels, ...locHotels];
       }
     }
 
