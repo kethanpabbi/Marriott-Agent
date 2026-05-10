@@ -7,19 +7,26 @@ export class HotelsAgent {
    * Searches for hotels based on region or specific criteria.
    */
   async searchHotels(query: string, filters?: { region?: string; priceMax?: number }): Promise<Hotel[]> {
+    const cleanedQuery = query.toLowerCase()
+      .replace("find a hotel in ", "")
+      .replace("marriott in ", "")
+      .replace("show me ", "")
+      .trim();
+
     return await prisma.hotel.findMany({
       where: {
         OR: [
-          { name: { contains: query } },
-          { location: { contains: query } },
-          { region: { contains: query } },
+          { name: { contains: cleanedQuery } },
+          { location: { contains: cleanedQuery } },
+          { region: { contains: cleanedQuery } },
+          { description: { contains: cleanedQuery } },
         ],
         status: { not: "Closed" },
       },
       include: {
         nearbyAttractions: true,
       },
-    }) as any; // Cast for simplified POC
+    }) as any;
   }
 
   /**

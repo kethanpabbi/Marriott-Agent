@@ -78,11 +78,13 @@ export class WorkflowManager {
   }
 
   private getSuggestedQuestions(query: string): string[] {
-    // Logic to generate 2-3 relevant questions
-    return [
-      `What are the dining options at these hotels?`,
-      `Are there any tourist attractions nearby?`,
-      `What is the pricing for a standard room?`
-    ];
+    const q = query.toLowerCase();
+    if (q.includes('hotel') || q.includes('stay') || q.includes('paris') || q.includes('london') || q.includes('maui')) {
+      return ["What are the dining options?", "Are there any tourist attractions nearby?", "What is the pricing for a standard room?"];
+    }
+    if (q.includes('price') || q.includes('cost')) {
+      return ["Do you have cheaper options?", "What amenities are included?", "Show me luxury suites"];
+    }
+    return ["Show me Marriotts in London", "What are the best Marriotts for families?", "Tell me about Marriott activities in Hawaii"];
   }
 }

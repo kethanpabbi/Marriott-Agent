@@ -10,40 +10,52 @@ async function main() {
 
   const hotels = [
     {
-      name: "St. Regis Maldives Vommuli Resort",
-      location: "Vommuli Island, Dhaalu Atoll, Maldives",
+      name: "The St. Regis Maldives Vommuli Resort",
+      location: "Dhaalu Atoll, Maldives",
       region: "Maldives",
-      description: "A private island paradise with overwater villas and legendary service.",
-      priceRange: "$1,500 - $5,000 per night",
-      amenities: "Private Pools, Spa, Butler Service, Diving Center",
-      restaurants: "Alba, Orientale, Cargo",
-      activities: "Snorkeling, Sunset Cruises, Tennis",
-      status: "Open",
-      rating: 4.9,
+      priceRange: "$1,500 - $5,000",
+      description: "Luxury overwater villas with private pools and world-class spa.",
+      amenities: "Pool, Spa, Private Beach, Butler Service",
     },
     {
       name: "JW Marriott Venice Resort & Spa",
-      location: "Isola delle Rose, Venice, Italy",
-      region: "Venice",
-      description: "A luxury escape on a private island with views of the Venice skyline.",
-      priceRange: "$400 - $1,200 per night",
-      amenities: "Rooftop Pool, Michelin-starred Dining, Spa",
-      restaurants: "Fiola at Dopolavoro, Sagra Rooftop",
-      activities: "Cooking Classes, Venice Lagoon Tours",
-      status: "Open",
-      rating: 4.7,
+      location: "Isola delle Rose, Venice",
+      region: "Europe",
+      priceRange: "$400 - $1,200",
+      description: "Private island resort with spectacular views of the Venice lagoon.",
+      amenities: "Rooftop Pool, Michelin-star Dining, Garden",
     },
     {
       name: "The Ritz-Carlton, Kyoto",
-      location: "Kamigyo-ku, Kyoto, Japan",
-      region: "Kyoto",
-      description: "A riverside oasis blending modern luxury with Japanese tradition.",
-      priceRange: "$800 - $2,500 per night",
-      amenities: "Traditional Tea House, Indoor Pool, Pierre Hermé Paris Pastries",
-      restaurants: "Mizuki, La Locanda",
-      activities: "Zen Meditation, Kimono Experience",
-      status: "Open",
-      rating: 4.8,
+      location: "Kamigyo-ku, Kyoto",
+      region: "Asia",
+      priceRange: "$800 - $2,500",
+      description: "Elegant riverside hotel blending traditional Japanese aesthetics with modern luxury.",
+      amenities: "Indoor Pool, Tea House, Cultural Activities",
+    },
+    {
+      name: "Paris Marriott Champs-Elysees Hotel",
+      location: "70 Avenue des Champs-Elysees, Paris",
+      region: "Europe",
+      priceRange: "$500 - $1,500",
+      description: "Five-star luxury on the world's most famous avenue.",
+      amenities: "Fitness Center, Sauna, Terrace, Restaurant",
+    },
+    {
+      name: "London Marriott Hotel County Hall",
+      location: "Westminster Bridge Rd, London",
+      region: "Europe",
+      priceRange: "$450 - $1,300",
+      description: "Historic hotel with views of Big Ben and the London Eye.",
+      amenities: "Executive Lounge, Indoor Pool, Steakhouse",
+    },
+    {
+      name: "Wailea Beach Resort - Marriott, Maui",
+      location: "Wailea, Maui, Hawaii",
+      region: "Hawaii",
+      priceRange: "$600 - $2,000",
+      description: "Stunning oceanfront resort in the heart of Wailea.",
+      amenities: "Adventure Pool, Golf, Oceanview Dining",
     }
   ];
 
@@ -52,13 +64,24 @@ async function main() {
       data: hotelData,
     });
 
-    // Add a few attractions for each
+    // Add a sample attraction for Kyoto
     if (hotel.name.includes("Kyoto")) {
       await prisma.attraction.create({
         data: {
           name: "Kamo River",
           description: "A beautiful river running through the heart of Kyoto.",
           distance: "0.1 km",
+          hotelId: hotel.id,
+        }
+      });
+    }
+    // Add a sample attraction for Paris
+    if (hotel.name.includes("Paris")) {
+      await prisma.attraction.create({
+        data: {
+          name: "Arc de Triomphe",
+          description: "One of the most famous monuments in Paris.",
+          distance: "0.2 km",
           hotelId: hotel.id,
         }
       });
