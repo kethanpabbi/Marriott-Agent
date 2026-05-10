@@ -1,10 +1,12 @@
 import { UserAgent } from './UserAgent';
 import { HotelsAgent } from './HotelsAgent';
 import { LLMService } from '@/lib/llm';
+import { ScraperService } from '@/tools/ScraperService';
 
 const userAgent = new UserAgent();
 const hotelsAgent = new HotelsAgent();
 const llmService = new LLMService();
+const scraperService = new ScraperService();
 
 export class WorkflowManager {
   /**
@@ -39,16 +41,24 @@ export class WorkflowManager {
     const isFollowUp = ['attraction', 'dining', 'restaurant', 'price', 'pricing', 'room', 'cost', 'nearby', 'tell me', 'show me'].some(k => query.toLowerCase().includes(k));
     
     if (hotels.length === 0 && (isFollowUp || history.length > 0)) {
-       // Search for recently mentioned locations in history
-       const locations = ['paris', 'london', 'hawaii', 'maui', 'venice', 'kyoto', 'maldives'];
-       const mentionedLocation = locations.find(l => 
-         history.some(m => m.content.toLowerCase().includes(l))
-       );
+       const locations = ['london', 'hawaii', 'maui', 'venice', 'kyoto', 'maldives', 'paris'];
+       
+       // 1. Check current query first (Priority)
+       let mentionedLocation = locations.find(l => query.toLowerCase().includes(l));
+       
+       // 2. If not in query, check recent history (Newest first)
+       if (!mentionedLocation) {
+         mentionedLocation = locations.find(l => 
+           [...history].reverse().some(m => m.content.toLowerCase().includes(l))
+         );
+       }
        
        if (mentionedLocation) {
-         hotels = await hotelsAgent.searchHotels(mentionedLocation);
+         const synced = await hotelsAgent.syncLocation(mentionedLocation, scraperService);
+         if (synced) {
+           hotels = await hotelsAgent.searchHotels(mentionedLocation);
+         }
        } else {
-         // Last resort: Get all open hotels so the LLM can pick
          hotels = await hotelsAgent.searchHotels(""); 
        }
     }
