@@ -38,17 +38,35 @@ export default function ChatInterface() {
     setInput('');
     setIsLoading(true);
 
-    // Mock API call
-    setTimeout(() => {
+    // Real API call
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'guest@example.com', query: text })
+      });
+      
+      const data = await response.json();
+      
+      if (data.error) throw new Error(data.error);
+
       const assistantMsg: Message = {
-        id: (Date.now() + 1).toString(),
+        id: Date.now().toString(),
         role: 'assistant',
-        content: `I've found some wonderful options for your request: "${text}". Marriott offers several properties in that category with world-class amenities. Would you like me to show you specific pricing and availability for those?`,
-        suggestions: ["Show me pricing", "What are the dining options?", "Nearby attractions"]
+        content: data.response,
+        suggestions: data.suggestions
       };
       setMessages(prev => [...prev, assistantMsg]);
+    } catch (error: any) {
+      const errorMsg: Message = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: "I'm having a bit of trouble connecting to my service. Please ensure the backend is running and API keys are configured."
+      };
+      setMessages(prev => [...prev, errorMsg]);
+    } finally {
       setIsLoading(false);
-    }, 1500);
+    }
   };
 
   return (
