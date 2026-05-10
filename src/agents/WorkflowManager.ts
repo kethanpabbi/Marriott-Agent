@@ -28,13 +28,34 @@ export class WorkflowManager {
       };
     }
 
-    // 3. User Context Retrieval
+    // 3. User Context & History Retrieval
     const user = await userAgent.getOrCreateUser(email);
+    const history = await userAgent.getChatHistory(email);
 
-    // 4. Hotel Retrieval & Filtering
-    const hotels = await hotelsAgent.searchHotels(query);
+    // 4. Determine Context (is this a follow-up?)
+    let hotels: any[] = [];
+    const isFollowUp = ['attraction', 'dining', 'restaurant', 'price', 'pricing', 'room', 'cost', 'nearby'].some(k => query.toLowerCase().includes(k));
     
-    // Filter by user dislikes (e.g., if user dislikes "beaches")
+    if (isFollowUp && history.length > 0) {
+      // Find the last assistant message that mentioned a hotel
+      const lastAssistantMessage = [...history].reverse().find(m => m.role === 'assistant' && m.content.includes("Marriott"));
+      if (lastAssistantMessage) {
+         // Try to find hotels based on the last context
+         // For POC, we'll just search for hotels again but with a broader context if needed
+         hotels = await hotelsAgent.searchHotels(query);
+         if (hotels.length === 0) {
+           // Fallback: use the previously found hotels by searching for the last query
+           const lastUserQuery = [...history].reverse().find(m => m.role === 'user')?.content || "";
+           hotels = await hotelsAgent.searchHotels(lastUserQuery);
+         }
+      } else {
+        hotels = await hotelsAgent.searchHotels(query);
+      }
+    } else {
+      hotels = await hotelsAgent.searchHotels(query);
+    }
+    
+    // Filter by user dislikes
     const filteredHotels = hotels.filter(h => {
       return !user.dislikes.some(dislike => 
         h.description.toLowerCase().includes(dislike.toLowerCase()) || 
@@ -42,8 +63,8 @@ export class WorkflowManager {
       );
     });
 
-    // 5. Generate Response using LLM
-    const response = await this.generateAIResponse(filteredHotels, query, user);
+    // 5. Generate Response using LLM with History
+    const response = await this.generateAIResponse(filteredHotels, query, user, history);
 
     // 6. Log Interaction
     await userAgent.logInteraction(email, 'user', query);
@@ -60,21 +81,42 @@ export class WorkflowManager {
     return keywords.some(k => query.toLowerCase().includes(k));
   }
 
-  private async generateAIResponse(hotels: any[], query: string, user: any): Promise<string> {
+  private async generateAIResponse(hotels: any[], query: string, user: any, history: any[]): Promise<string> {
     if (hotels.length === 0) {
       return "I couldn't find any Marriott properties matching that specific request. Would you like to try searching for a different region or type of hotel?";
     }
 
-    const context = `
-      User Likes: ${user.likes.join(', ')}
-      Recommended Hotels: ${hotels.slice(0, 3).map(h => `${h.name} in ${h.location}`).join('; ')}
-      User Query: ${query}
-    `;
+    const hotelContext = hotels.slice(0, 3).map(h => `
+      Name: ${h.name}
+      Location: ${h.location}
+      Price: ${h.priceRange}
+      Amenities: ${h.amenities}
+      Restaurants: ${h.restaurants}
+      Activities: ${h.activities}
+      Description: ${h.description}
+      Attractions: ${h.nearbyAttractions?.map((a: any) => `${a.name} (${a.distance})`).join(', ')}
+    `).join('\n---\n');
 
-    return await llmService.generateResponse([
-      { role: 'system', content: "You are Marriott Lumina. Use the provided context to recommend hotels. Be concise and luxury-oriented." },
-      { role: 'user', content: context }
-    ]);
+    const messages = [
+      { 
+        role: 'system', 
+        content: `You are Marriott Lumina, a premium AI concierge. 
+        Your goal is to provide luxurious, helpful, and accurate information about Marriott properties.
+        Always format your output beautifully using Markdown (bolding, lists, etc.) but avoid heavy headers like # or ##. 
+        Use symbols like ✓ or • for lists.
+        
+        Available Hotels in Context:
+        ${hotelContext}
+        
+        User Preferences:
+        Likes: ${user.likes.join(', ')}
+        Dislikes: ${user.dislikes.join(', ')}`
+      },
+      ...history.slice(-5).map(m => ({ role: m.role, content: m.content })),
+      { role: 'user', content: query }
+    ];
+
+    return await llmService.generateResponse(messages as any);
   }
 
   private getSuggestedQuestions(query: string): string[] {

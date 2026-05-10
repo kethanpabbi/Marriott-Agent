@@ -104,4 +104,16 @@ export class UserAgent {
       },
     });
   }
+
+  /**
+   * Retrieves the recent chat history for a user.
+   */
+  async getChatHistory(email: string, limit: number = 10) {
+    const history = await prisma.message.findMany({
+      where: { userId: email },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
+    });
+    return history;
+  }
 }
