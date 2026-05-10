@@ -41,24 +41,28 @@ export class WorkflowManager {
     const isFollowUp = ['attraction', 'dining', 'restaurant', 'price', 'pricing', 'room', 'cost', 'nearby', 'tell me', 'show me'].some(k => query.toLowerCase().includes(k));
     
     if (hotels.length === 0 && (isFollowUp || history.length > 0)) {
-       const locations = ['london', 'hawaii', 'maui', 'venice', 'kyoto', 'maldives', 'paris'];
+       const locations = ['london', 'hawaii', 'maui', 'venice', 'kyoto', 'maldives', 'paris', 'oahu', 'honolulu'];
        
-       // 1. Check current query first (Priority)
+       // 1. Check current query first
        let mentionedLocation = locations.find(l => query.toLowerCase().includes(l));
        
-       // 2. If not in query, check recent history (Newest first)
+       // 2. If not in query, find the MOST RECENT location mentioned in the WHOLE conversation history
        if (!mentionedLocation) {
-         mentionedLocation = locations.find(l => 
-           [...history].reverse().some(m => m.content.toLowerCase().includes(l))
-         );
+         for (let i = history.length - 1; i >= 0; i--) {
+           const found = locations.find(l => history[i].content.toLowerCase().includes(l));
+           if (found) {
+             mentionedLocation = found;
+             break;
+           }
+         }
        }
        
        if (mentionedLocation) {
-         const synced = await hotelsAgent.syncLocation(mentionedLocation, scraperService);
-         if (synced) {
-           hotels = await hotelsAgent.searchHotels(mentionedLocation);
-         }
+         // Force sync and retrieval
+         await hotelsAgent.syncLocation(mentionedLocation, scraperService);
+         hotels = await hotelsAgent.searchHotels(mentionedLocation);
        } else {
+         // Last resort: Provide all properties to the AI
          hotels = await hotelsAgent.searchHotels(""); 
        }
     }
@@ -92,7 +96,7 @@ export class WorkflowManager {
       };
     }
 
-    const hotelContext = hotels.slice(0, 3).map(h => `
+    const hotelContext = hotels.slice(0, 10).map(h => `
       ID: ${h.id}
       Name: ${h.name}
       Location: ${h.location}

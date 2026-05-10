@@ -118,15 +118,22 @@ export default function ChatInterface() {
                     // Headings (any number of #)
                     if (formatted.startsWith('#')) {
                       const text = formatted.replace(/^#+\s*/, '');
-                      return <span key={i} className="markdown-heading">{text}</span>;
+                      return <span key={i} className="markdown-heading" style={{ fontSize: '1.4rem', marginTop: '16px' }}>{text}</span>;
                     }
 
                     // Bold text
                     formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
                     
-                    return (
-                      <p key={i} dangerouslySetInnerHTML={{ __html: formatted }} style={{ marginBottom: '4px' }} />
-                    );
+                    // Bullet points (handle * or -)
+                    if (formatted.trim().startsWith('* ') || formatted.trim().startsWith('- ')) {
+                      const bulletText = formatted.trim().replace(/^[*|-]\s*/, '');
+                      return (
+                        <p key={i} style={{ paddingLeft: '16px', position: 'relative', marginBottom: '4px' }}>
+                          <span style={{ position: 'absolute', left: '0', color: 'var(--accent)' }}>•</span>
+                          <span dangerouslySetInnerHTML={{ __html: bulletText }} />
+                        </p>
+                      );
+                    }
                   })}
                 </div>
                 
