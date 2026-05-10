@@ -1,8 +1,10 @@
 import { UserAgent } from './UserAgent';
 import { HotelsAgent } from './HotelsAgent';
+import { LLMService } from '@/lib/llm';
 
 const userAgent = new UserAgent();
 const hotelsAgent = new HotelsAgent();
+const llmService = new LLMService();
 
 export class WorkflowManager {
   /**
@@ -40,8 +42,8 @@ export class WorkflowManager {
       );
     });
 
-    // 5. Generate Response (Mocking LLM generation for the POC structure)
-    const response = this.generateResponse(filteredHotels, query);
+    // 5. Generate Response using LLM
+    const response = await this.generateAIResponse(filteredHotels, query, user);
 
     // 6. Log Interaction
     await userAgent.logInteraction(email, 'user', query);
@@ -58,13 +60,21 @@ export class WorkflowManager {
     return keywords.some(k => query.toLowerCase().includes(k));
   }
 
-  private generateResponse(hotels: any[], query: string): string {
+  private async generateAIResponse(hotels: any[], query: string, user: any): Promise<string> {
     if (hotels.length === 0) {
       return "I couldn't find any Marriott properties matching that specific request. Would you like to try searching for a different region or type of hotel?";
     }
 
-    const hotelNames = hotels.slice(0, 3).map(h => h.name).join(", ");
-    return `Certainly! Based on your interest in ${query}, I recommend checking out ${hotelNames}. These properties offer a variety of amenities and are conveniently located near popular attractions. Would you like more details on any of these?`;
+    const context = `
+      User Likes: ${user.likes.join(', ')}
+      Recommended Hotels: ${hotels.slice(0, 3).map(h => `${h.name} in ${h.location}`).join('; ')}
+      User Query: ${query}
+    `;
+
+    return await llmService.generateResponse([
+      { role: 'system', content: "You are Marriott Lumina. Use the provided context to recommend hotels. Be concise and luxury-oriented." },
+      { role: 'user', content: context }
+    ]);
   }
 
   private getSuggestedQuestions(query: string): string[] {
