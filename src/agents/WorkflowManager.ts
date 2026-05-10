@@ -34,17 +34,30 @@ export class WorkflowManager {
     // 3. User Context Retrieval
     const user = await userAgent.getOrCreateUser(email);
 
-    // 4. AGENTIC REASONING & LEARNING STEP
-    // We ask the LLM to analyze the situation, extract preferences, and decide on discovery.
+    // 4. PROGRAMMATIC CONTEXT TRACKING
+    // Before asking the AI, we identify the last city discussed in history to "lock" the context.
+    const cityKeywords = ['london', 'paris', 'mumbai', 'kyoto', 'dublin', 'melbourne', 'sydney', 'new york', 'tokyo', 'berlin', 'barcelona', 'chennai', 'bangalore'];
+    let lastCity = "none";
+    for (const msg of [...history].reverse()) {
+      const found = cityKeywords.find(city => msg.content.toLowerCase().includes(city));
+      if (found) {
+        lastCity = found;
+        break;
+      }
+    }
+
+    // 5. AGENTIC REASONING & LEARNING STEP
     const reasoningPrompt = `
         Analyze the user's latest query and the conversation history.
         
+        CONTEXT LOCK: The last city discussed was "${lastCity}".
+        
         TASK:
-        1. "activeLocation": Identify the CURRENT city/cities. If the user asks a follow-up (e.g. "which is cheaper?"), prioritize the MOST RECENT city discussed in the history.
-        2. "isFollowUp": true if this query relies on the context of the previous turn.
-        3. "needsSync": true if new data is required.
+        1. "activeLocation": Identify the city/cities. If it's a follow-up (e.g. "which is cheaper?"), STRICTLY USE "${lastCity}" unless a new city is mentioned.
+        2. "isFollowUp": true if this query relies on previous context.
+        3. "needsSync": true if new data is required for the city.
         4. "userProfileUpdate": Extract new preferences.
-        5. "reasoning": Your logic, explaining why you chose the activeLocation (mentioning the most recent relevant city).
+        5. "reasoning": Your logic.
         
         OUTPUT ONLY JSON:
         { 
