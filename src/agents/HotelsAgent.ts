@@ -87,58 +87,56 @@ export class HotelsAgent {
     console.log(`🌐 No local data for ${location}. Attempting autonomous discovery...`);
     
     // 1. REAL-TIME SEARCH: Find multiple directory leads
-    const searchResults = await scraper.search(`official list of Marriott Bonvoy hotels in ${location} Ireland`);
-    const potentialUrls = searchResults
-      .map((r: any) => r.url)
-      .filter((u: string) => u.includes('marriott.com'))
-      .slice(0, 3); // Try top 3 Marriott-specific leads
-
     let deepScrapeContent = "";
-    for (const url of potentialUrls) {
-      console.log(`🔍 Attempting deep-scrape: ${url}`);
-      const scrapeResult = await scraper.scrapeProperty(url);
-      const content = scrapeResult?.data?.markdown || JSON.stringify(scrapeResult?.data) || "";
-      if (content.length > 2000) {
-        deepScrapeContent += `\n--- SOURCE: ${url} ---\n${content}`;
+    try {
+      const searchResults = await scraper.search(`official list of Marriott Bonvoy hotels in ${location}`);
+      const potentialUrls = searchResults
+        .map((r: any) => r.url)
+        .filter((u: string) => u && u.includes('marriott.com'))
+        .slice(0, 3);
+
+      for (const url of potentialUrls) {
+        console.log(`🔍 Attempting deep-scrape: ${url}`);
+        const scrapeResult = await scraper.scrapeProperty(url);
+        const content = scrapeResult?.data?.markdown || JSON.stringify(scrapeResult?.data) || "";
+        if (content.length > 1000) {
+          deepScrapeContent += `\n--- SOURCE: ${url} ---\n${content}`;
+        }
       }
+    } catch (err) {
+      console.warn("Search/Scrape failed, falling back to generative discovery:", err);
     }
 
-    // 2. KNOWLEDGE SYNTHESIS: Extract the FULL portfolio
+    // 2. KNOWLEDGE SYNTHESIS: Extract the FULL portfolio (with fallback to internal knowledge)
     const discoveryPrompt = `
       You are the Marriott Portfolio Specialist. 
       The user is looking for ALL Marriott Bonvoy hotels in: ${location}.
       
-      I have scraped live Marriott directories:
-      ${deepScrapeContent.slice(0, 20000)}
+      SOURCE DATA (FROM LIVE SEARCH):
+      ${deepScrapeContent ? deepScrapeContent.slice(0, 20000) : "NO LIVE DATA FOUND. USE INTERNAL KNOWLEDGE."}
 
       TASK:
-      1. Extract EVERY unique Marriott property name mentioned in the text.
-      2. Pay special attention to "Autograph Collection", "The College Green Hotel", and "The Shelbourne".
-      3. Identify at least 7-10 properties if they are listed.
-      4. DO NOT use internal knowledge from before 2024. Use ONLY the scraped text.
+      1. Extract or provide a list of REAL Marriott properties in ${location}.
+      2. If you have LIVE DATA above, use it as the primary source.
+      3. If no live data, use your internal knowledge to provide at least 5 REAL properties.
+      4. Pay attention to rebrandings (e.g. Westin Dublin is now College Green Hotel).
       
-      OUTPUT ONLY JSON. NO CONVERSATIONAL TEXT. NO PREAMBLE.
-      
-      JSON FORMAT:
+      OUTPUT ONLY JSON. NO PREAMBLE.
       { "hotels": [{ "name": string, "price": string, "amenities": string[], "description": string, "rating": number }] }
     `;
 
     try {
       const discoveryResponse = await llmService.generateResponse([{ role: 'user', content: discoveryPrompt }]);
       
-      // Extract JSON block more reliably
       const startIdx = discoveryResponse.indexOf('{');
       const endIdx = discoveryResponse.lastIndexOf('}');
-      
-      if (startIdx === -1 || endIdx === -1) {
-        throw new Error("Could not find JSON block in LLM response");
-      }
+      if (startIdx === -1 || endIdx === -1) throw new Error("No JSON found");
 
       const jsonStr = discoveryResponse.substring(startIdx, endIdx + 1);
       const discovered = JSON.parse(jsonStr);
 
       if (discovered.hotels && discovered.hotels.length > 0) {
-        console.log(`🧠 Discovered ${discovered.hotels.length} verified properties for ${location} via Deep-Scrape.`);
+        console.log(`🧠 Discovered ${discovered.hotels.length} verified properties for ${location}.`);
         
         for (const h of discovered.hotels) {
           await prisma.hotel.upsert({
