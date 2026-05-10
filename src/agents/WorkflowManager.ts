@@ -122,6 +122,9 @@ export class WorkflowManager {
         OUTPUT FORMAT:
         [Your helpful, luxury-toned response in Markdown]
         
+        CRITICAL: DO NOT use trailing ** or * at the end of paragraphs.
+        CRITICAL: The tag "SUGGESTIONS:" must ONLY appear at the very end of your response, after all your text.
+        
         SUGGESTIONS:
         [First user-style question]
         [Second user-style question]
