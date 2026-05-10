@@ -118,6 +118,7 @@ export class WorkflowManager {
     const hotelContext = hotels.slice(0, 10).map(h => `
       ID: ${h.id}
       Name: ${h.name}
+      Rating: ${h.rating} / 5.0
       Location: ${h.location}
       Price: ${h.priceRange}
       Amenities: ${h.amenities}
