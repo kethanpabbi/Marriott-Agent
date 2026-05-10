@@ -139,10 +139,10 @@ export class HotelsAgent {
       ${deepScrapeContent.slice(0, 25000)}
 
       TASK:
-      1. Extract EVERY unique Marriott property. According to official records, there should be approximately ${needsDiscovery && typeof officialCount !== 'undefined' ? officialCount : '7+'} properties in this area.
+      1. Extract EVERY unique Marriott property. According to official records, there are approximately ${needsDiscovery && officialCount > 0 ? officialCount : 'all listed'} properties in this area.
       2. BRAND CHECK: Only include official Marriott brands (Ritz-Carlton, St. Regis, JW Marriott, W Hotels, Edition, Autograph Collection, Renaissance, Marriott, Sheraton, Delta, Westin, Le Méridien, Gaylord, Courtyard, Four Points, SpringHill Suites, Protea, Fairfield, AC Hotels, Aloft, Moxy, Residence Inn, TownePlace Suites, Element).
-      3. REBRANDING CHECK: Use current 2026 names (e.g. Westin Dublin is now College Green Hotel).
-      4. IGNORE competitors (Maldron, Hilton, IHG).
+      3. REBRANDING CHECK: Use current 2026 names from the scraped text.
+      4. IGNORE competitors (Hilton, IHG, Hyatt, etc.).
       5. RATING: Provide actual rating found or "N/A".
       
       OUTPUT ONLY JSON. NO PREAMBLE.
