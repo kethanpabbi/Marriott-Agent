@@ -34,47 +34,65 @@ export class WorkflowManager {
     // 3. User Context Retrieval
     const user = await userAgent.getOrCreateUser(email);
 
-    // 4. AGENTIC REASONING STEP
-    // We ask the LLM to analyze the situation and decide what to do.
+    // 4. AGENTIC REASONING & LEARNING STEP
+    // We ask the LLM to analyze the situation, extract preferences, and decide on discovery.
     const reasoningPrompt = `
-    You are the reasoning engine for Marriott Lumina.
-    User Query: "${query}"
-    Recent History: ${history.slice(-3).map(m => `[${m.role}] ${m.content}`).join(' | ')}
-    
-    TASK:
-    1. Determine the active location(s). If multiple (e.g. comparing cities), return them as a comma-separated list (e.g., "mumbai, bangalore").
-    2. Determine if this is a follow-up to the previous turn.
-    3. Decide if we need to sync new data via Firecrawl (only for new locations or if info is missing).
-    
-    RESPONSE FORMAT (JSON):
-    {
-      "activeLocation": "string",
-      "isFollowUp": boolean,
-      "reasoning": "string",
-      "needsSync": boolean
-    }`;
+        Analyze the user's latest query and the conversation history.
+        
+        TASK:
+        1. "activeLocation": The city/cities mentioned. If multiple, separate with commas (e.g. "Chennai, Bangalore").
+        2. "isFollowUp": Is this a continuation of a previous hotel-specific question?
+        3. "needsSync": true if the location isn't in history or if deeper details are needed.
+        4. "userProfileUpdate": Extract any NEW likes or dislikes mentioned (e.g. "I love spas", "I hate beaches").
+        5. "reasoning": Your step-by-step logic.
+        
+        OUTPUT ONLY JSON:
+        { 
+          "activeLocation": "string", 
+          "isFollowUp": boolean, 
+          "needsSync": boolean, 
+          "userProfileUpdate": { "likes": string[], "dislikes": string[] },
+          "reasoning": "string" 
+        }
+    `;
 
-    const reasoningResult = await llmService.generateResponse([{ role: 'user', content: reasoningPrompt }]);
+    const reasoningResponse = await llmService.generateResponse([{ role: 'user', content: reasoningPrompt + `\nHistory: ${JSON.stringify(history.slice(-5))}\nQuery: ${query}` }]);
     let plan: any;
     try {
-      // Find the JSON block in case the LLM added prose
-      const jsonStr = reasoningResult.match(/\{[\s\S]*\}/)?.[0] || reasoningResult;
+      const jsonStr = reasoningResponse.match(/\{[\s\S]*\}/)?.[0] || reasoningResponse;
       plan = JSON.parse(jsonStr);
     } catch (e) {
-      plan = { activeLocation: "none", isFollowUp: false, reasoning: "Fallback reasoning", needsSync: false };
+      plan = { activeLocation: "none", isFollowUp: false, needsSync: false, userProfileUpdate: { likes: [], dislikes: [] }, reasoning: "Fallback" };
     }
 
     console.log(`🧠 Reasoning: ${plan.reasoning}`);
 
-    // 5. Execution based on Plan
-    let hotels: any[] = [];
-    const locations = plan.activeLocation ? plan.activeLocation.split(',').map((l: string) => l.trim().toLowerCase()) : [];
+    // 5. LEARNING & ADAPTATION: Update User Profile
+    if (plan.userProfileUpdate && (plan.userProfileUpdate.likes.length > 0 || plan.userProfileUpdate.dislikes.length > 0)) {
+      console.log(`💾 Learning user preferences: ${JSON.stringify(plan.userProfileUpdate)}`);
+      const newLikes = Array.from(new Set([...user.likes, ...plan.userProfileUpdate.likes]));
+      const newDislikes = Array.from(new Set([...user.dislikes, ...plan.userProfileUpdate.dislikes]));
+      await userAgent.updatePreferences(email, newLikes, newDislikes);
+      // Refresh user context for current turn
+      user.likes = newLikes;
+      user.dislikes = newDislikes;
+    }
 
-    if (plan.activeLocation && plan.activeLocation !== "none") {
+    // 6. AUTONOMOUS DISCOVERY: Sync Locations
+    const locations = plan.activeLocation && plan.activeLocation !== "none" 
+      ? plan.activeLocation.split(',').map((l: string) => l.trim().toLowerCase()) 
+      : [];
+    
+    if (plan.needsSync && locations.length > 0) {
       for (const loc of locations) {
-        if (plan.needsSync) {
-          await hotelsAgent.syncLocation(loc, scraperService);
-        }
+        await hotelsAgent.syncLocation(loc, scraperService);
+      }
+    }
+
+    // 7. Data Retrieval
+    let hotels: any[] = [];
+    if (locations.length > 0) {
+      for (const loc of locations) {
         const locHotels = await hotelsAgent.searchHotels(loc);
         hotels = [...hotels, ...locHotels];
       }
@@ -106,10 +124,16 @@ export class WorkflowManager {
   }
 
   private async generateAIResponse(hotels: any[], query: string, user: any, history: any[]): Promise<{ response: string, suggestions: string[] }> {
+    const guestProfile = `
+      GUEST PREFERENCES:
+      - Likes: ${user.likes.join(', ') || 'None yet'}
+      - Dislikes: ${user.dislikes.join(', ') || 'None yet'}
+    `;
+
     if (hotels.length === 0) {
       return { 
-        response: "I couldn't find any Marriott properties matching that specific request. Would you like to try searching for a different region or type of hotel?",
-        suggestions: ["Show me Marriotts in London", "Find hotels in Paris", "What are the best beach resorts?"]
+        response: "I couldn't find any Marriott properties matching that specific request in our global directory yet. However, based on your preferences, I can help you find alternatives in cities I've already explored. Where would you like to look?",
+        suggestions: ["Show me Marriotts in London", "Find hotels in Paris"]
       };
     }
 
@@ -123,7 +147,6 @@ export class WorkflowManager {
       Restaurants: ${h.restaurants}
       Activities: ${h.activities}
       Description: ${h.description}
-      Attractions: ${h.nearbyAttractions?.map((a: any) => `${a.name} (${a.distance})`).join(', ')}
     `).join('\n---\n');
 
     const messages = [
@@ -131,9 +154,13 @@ export class WorkflowManager {
         role: 'system', 
         content: `You are Marriott Lumina, a premium AI concierge for Marriott International.
         Only discuss properties that are part of the Marriott Bonvoy portfolio.
-        CONVERSATIONAL RULES:
-        1. NO REPETITIVE GREETINGS: Do not say "Welcome to Marriott Lumina" or "I'm delighted to assist" in every message. Be conversational and direct.
-        2. CONTEXT LOCK: Only answer based on the "Available Hotels" provided below. If a hotel is not in the list, admit you don't have its specific details yet.
+        
+        ${guestProfile}
+        
+        ADAPTATION RULES:
+        1. PERSOANLIZATION: Use the GUEST PREFERENCES above to tailor your answer. If they dislike beaches, don't recommend a resort even if it's in the results. If they like spas, highlight the spa facilities first.
+        2. NO REPETITIVE GREETINGS: Be conversational and direct.
+        3. CONTEXT LOCK: Only answer based on the "Available Hotels" provided below.
         3. HONEST SUGGESTIONS: Only suggest follow-up questions that you CAN answer using the provided "Available Hotels" context. Do not suggest "Special Offers" if you don't see any in the data.
         4. USER-PERSPECTIVE SUGGESTIONS: Phrased suggestions as if the USER is asking them. (e.g., "Tell me about the pool" instead of "Would you like to know about the pool?").
         
