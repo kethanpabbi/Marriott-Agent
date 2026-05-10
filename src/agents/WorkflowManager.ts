@@ -34,33 +34,64 @@ export class WorkflowManager {
     // 3. User Context Retrieval
     const user = await userAgent.getOrCreateUser(email);
 
-    // 4. Smart Hotel Retrieval (Autonomous Location Detection)
-    let hotels: any[] = [];
-    let activeLocation: string | undefined;
+    // 4. AGENTIC REASONING STEP
+    // We ask the LLM to analyze the situation and decide what to do.
+    const reasoningPrompt = `
+    You are the reasoning engine for Marriott Lumina.
+    User Query: "${query}"
+    Recent History: ${history.slice(-3).map(m => `[${m.role}] ${m.content}`).join(' | ')}
     
-    // 1. Detect location in current query
-    const detectPrompt = `Identify the city or destination in this query: "${query}". 
-    History Context: ${history.slice(-2).map(m => m.content).join(' | ')}
-    Respond with ONLY the city name or "none".`;
+    TASK:
+    1. Determine the active location/destination (e.g., "mumbai", "paris", "none").
+    2. Determine if this is a follow-up to the previous turn.
+    3. Decide if we need to sync new data via Firecrawl (only for new locations or if info is missing).
     
-    const detected = await llmService.generateResponse([{ role: 'user', content: detectPrompt }]);
-    if (detected && detected.toLowerCase() !== 'none') {
-      activeLocation = detected.toLowerCase().trim();
+    RESPONSE FORMAT (JSON):
+    {
+      "activeLocation": "string",
+      "isFollowUp": boolean,
+      "reasoning": "string",
+      "needsSync": boolean
+    }`;
+
+    const reasoningResult = await llmService.generateResponse([{ role: 'user', content: reasoningPrompt }]);
+    let plan: any;
+    try {
+      // Find the JSON block in case the LLM added prose
+      const jsonStr = reasoningResult.match(/\{[\s\S]*\}/)?.[0] || reasoningResult;
+      plan = JSON.parse(jsonStr);
+    } catch (e) {
+      plan = { activeLocation: "none", isFollowUp: false, reasoning: "Fallback reasoning", needsSync: false };
     }
-    
-    if (activeLocation) {
-      console.log(`🎯 Location Lock: ${activeLocation}`);
-      await hotelsAgent.syncLocation(activeLocation, scraperService);
-      hotels = await hotelsAgent.searchHotels(activeLocation);
-    } else {
+
+    console.log(`🧠 Reasoning: ${plan.reasoning}`);
+
+    // 5. Execution based on Plan
+    let hotels: any[] = [];
+    if (plan.activeLocation && plan.activeLocation !== "none") {
+      if (plan.needsSync) {
+        await hotelsAgent.syncLocation(plan.activeLocation, scraperService);
+      }
+      hotels = await hotelsAgent.searchHotels(plan.activeLocation);
+    } else if (plan.isFollowUp) {
+      // Try to find the most recent location in history as a last resort
+      const locations = ['london', 'hawaii', 'paris', 'mumbai', 'kyoto', 'venice'];
+      const lastLoc = [...history].reverse().map(m => locations.find(l => m.content.toLowerCase().includes(l))).find(l => !!l);
+      if (lastLoc) {
+        hotels = await hotelsAgent.searchHotels(lastLoc);
+      }
+    }
+
+    // If still no hotels, search by query
+    if (hotels.length === 0) {
       hotels = await hotelsAgent.searchHotels(query);
     }
-    
-    // If still empty, use global pool
+
+    // Final fallback: all hotels
     if (hotels.length === 0) {
       hotels = await hotelsAgent.searchHotels("");
     }
-    
+
     const filteredHotels = hotels.slice(0, 10);
 
     // 5. Generate Response & Suggestions using LLM
