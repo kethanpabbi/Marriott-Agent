@@ -86,20 +86,20 @@ export class HotelsAgent {
 
     console.log(`🌐 No local data for ${location}. Attempting autonomous discovery...`);
     
-    // 1. REAL-TIME SEARCH: Find multiple directory leads with focus on ratings/prices
+    // 1. REAL-TIME SEARCH: Find multiple directory leads
     let deepScrapeContent = "";
     try {
-      const searchResults = await scraper.search(`official Marriott Bonvoy hotels in ${location} with ratings and current prices`);
+      const searchResults = await scraper.search(`Marriott Bonvoy hotels in ${location} official list with ratings`);
       const potentialUrls = searchResults
         .map((r: any) => r.url)
-        .filter((u: string) => u && u.includes('marriott.com'))
+        .filter((u: string) => u && u.length > 5)
         .slice(0, 3);
 
       for (const url of potentialUrls) {
-        console.log(`🔍 Attempting deep-scrape for ratings/prices: ${url}`);
+        console.log(`🔍 Scraping discovery source: ${url}`);
         const scrapeResult = await scraper.scrapeProperty(url);
         const content = scrapeResult?.data?.markdown || JSON.stringify(scrapeResult?.data) || "";
-        if (content.length > 1000) {
+        if (content.length > 500) {
           deepScrapeContent += `\n--- SOURCE: ${url} ---\n${content}`;
         }
       }
@@ -107,19 +107,20 @@ export class HotelsAgent {
       console.warn("Search/Scrape failed:", err);
     }
 
-    // 2. KNOWLEDGE SYNTHESIS: Extract the FULL portfolio with ACTUAL ratings
+    // 2. KNOWLEDGE SYNTHESIS: Extract the FULL portfolio
     const discoveryPrompt = `
       You are the Marriott Portfolio Specialist. 
-      Identify ALL real Marriott properties in: ${location}.
+      Identify ALL real Marriott Bonvoy properties in: ${location}.
       
-      SOURCE DATA (FROM LIVE SEARCH):
-      ${deepScrapeContent ? deepScrapeContent.slice(0, 20000) : "NO LIVE DATA. USE RECENT KNOWLEDGE."}
+      LIVE SCRAPED DATA:
+      ${deepScrapeContent.slice(0, 25000)}
 
       TASK:
-      1. Extract REAL Marriott properties.
-      2. For each, you MUST find or provide the ACTUAL REAL-WORLD RATING (e.g. 4.8/5). 
-      3. If the scraped text has a rating, use it. If not, use your knowledge of the property's real-world standing as of 2026.
-      4. DO NOT MAKE UP NUMBERS. If a rating is truly not found, return "N/A".
+      1. Extract EVERY unique Marriott property. YOU MUST FIND AT LEAST 7 PROPERTIES if they exist.
+      2. BRAND CHECK: Only include official Marriott brands: Ritz-Carlton, St. Regis, JW Marriott, W Hotels, Edition, Autograph Collection (e.g. The Shelbourne, College Green), Renaissance, Marriott, Sheraton, Delta, Westin, Le Méridien, Gaylord, Courtyard, Four Points, SpringHill Suites, Protea, Fairfield, AC Hotels, Aloft, Moxy, Residence Inn, TownePlace Suites, Element.
+      3. REBRANDING CHECK: If a hotel was rebranded (e.g. Westin Dublin -> College Green Hotel), use the NEW NAME from the text.
+      4. IGNORE competitor hotels like Maldron, Hilton, or IHG even if they appear in the text.
+      5. RATING: Provide the ACTUAL rating found or return "N/A".
       
       OUTPUT ONLY JSON. NO PREAMBLE.
       { "hotels": [{ "name": string, "price": string, "amenities": string[], "description": string, "rating": string | number }] }
