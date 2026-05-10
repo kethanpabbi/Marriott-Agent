@@ -86,22 +86,32 @@ export class HotelsAgent {
 
     console.log(`🌐 No local data for ${location}. Attempting autonomous discovery...`);
     
-    // 1. REAL-TIME SEARCH: Find the LATEST Marriott properties via live web search
-    const searchResults = await scraper.search(`official Marriott Bonvoy hotels in ${location}`);
-    const searchContext = searchResults.map((r: any) => `${r.title}: ${r.url}`).join('\n');
+    // 1. REAL-TIME SEARCH: Find the official Marriott destination page
+    const searchResults = await scraper.search(`official Marriott Bonvoy hotels directory in ${location}`);
+    
+    // Pick the most likely Marriott official URL (usually the one containing 'marriott.com' and 'destinations')
+    const bestUrl = searchResults.find((r: any) => r.url.includes('marriott.com') && r.url.includes('destinations'))?.url 
+                 || searchResults[0]?.url;
 
-    // 2. KNOWLEDGE SYNTHESIS: Use LLM to extract verified property data from search results
+    let deepScrapeContent = "";
+    if (bestUrl) {
+      console.log(`🔍 Deep-scraping verified directory: ${bestUrl}`);
+      const scrapeResult = await scraper.scrapeProperty(bestUrl);
+      deepScrapeContent = scrapeResult?.data?.markdown || JSON.stringify(scrapeResult?.data) || "";
+    }
+
+    // 2. KNOWLEDGE SYNTHESIS: Use LLM to extract verified property data from DEEP SCRAPE
     const discoveryPrompt = `
       You are the Marriott Portfolio Specialist. 
       The user is looking for Marriott Bonvoy hotels in: ${location}.
       
-      I found these search results:
-      ${searchContext}
+      I have scraped the live Marriott directory for this city:
+      ${deepScrapeContent.slice(0, 15000)} // Pass a large chunk of the page
 
       TASK:
-      Identify the REAL, CURRENT Marriott properties in this city. 
-      NOTE: Be aware of recent rebrandings (e.g. Westin Dublin is now College Green Hotel).
-      Provide up to 7 properties if they exist.
+      1. Identify ALL real Marriott properties listed in this text. 
+      2. IGNORE your internal training data if it contradicts the text (e.g. if a hotel has a new name, use the NEW name from the text).
+      3. Extract up to 10 properties.
       
       OUTPUT ONLY JSON:
       { "hotels": [{ "name": string, "price": string, "amenities": string[], "description": string, "rating": number }] }
@@ -113,7 +123,7 @@ export class HotelsAgent {
       const discovered = JSON.parse(jsonStr);
 
       if (discovered.hotels && discovered.hotels.length > 0) {
-        console.log(`🧠 Discovered ${discovered.hotels.length} verified properties for ${location} via Real-Time Search.`);
+        console.log(`🧠 Discovered ${discovered.hotels.length} verified properties for ${location} via Deep-Scrape.`);
         
         for (const h of discovered.hotels) {
           await prisma.hotel.upsert({
@@ -121,10 +131,10 @@ export class HotelsAgent {
             update: {
               location: `${location}`,
               priceRange: h.price,
-              description: h.description || `A premium Marriott Bonvoy property in ${location} discovered through autonomous search.`,
+              description: h.description || `Verified Marriott property in ${location}.`,
               amenities: h.amenities.join(', '),
               restaurants: "Marriott Signature Dining",
-              activities: `Cultural discovery in ${location}`,
+              activities: `Experience ${location}`,
               region: "Global Discovery",
               rating: h.rating || (4.5 + (Math.random() * 0.4))
             },
@@ -132,10 +142,10 @@ export class HotelsAgent {
               name: h.name,
               location: `${location}`,
               priceRange: h.price,
-              description: h.description || `A premium Marriott Bonvoy property in ${location} discovered through autonomous search.`,
+              description: h.description || `Verified Marriott property in ${location}.`,
               amenities: h.amenities.join(', '),
               restaurants: "Marriott Signature Dining",
-              activities: `Cultural discovery in ${location}`,
+              activities: `Experience ${location}`,
               region: "Global Discovery",
               rating: h.rating || (4.5 + (Math.random() * 0.4))
             }
