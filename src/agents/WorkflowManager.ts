@@ -28,18 +28,32 @@ export class WorkflowManager {
     // 3. User Context Retrieval
     const user = await userAgent.getOrCreateUser(email);
 
-    // 4. AGENTIC REASONING & LEARNING STEP
-    // We ask the LLM to analyze the situation, identify the active city from history, and decide on discovery.
+    // 4. DYNAMIC CONTEXT EXTRACTION
+    // We identify the city mentioned in the VERY LAST turn to prevent "Paris Drift".
+    let lastOfferedCity = "none";
+    if (history.length > 0) {
+      const lastAssistantMsg = [...history].reverse().find(m => m.role === 'assistant');
+      if (lastAssistantMsg) {
+        // Simple regex to find cities mentioned in the last response
+        const cities = ['singapore', 'dubai', 'london', 'berlin', 'barcelona', 'melbourne', 'new york', 'paris', 'tokyo'];
+        const found = cities.find(c => lastAssistantMsg.content.toLowerCase().includes(c));
+        if (found) lastOfferedCity = found;
+      }
+    }
+
+    // 5. AGENTIC REASONING & LEARNING STEP
     const reasoningPrompt = `
         Analyze the user's latest query and the conversation history.
         
+        LAST_OFFERED_CITY: "${lastOfferedCity}"
+        
         TASK:
-        1. "inScope": true if the query is related to Marriott hotels, travel, amenities, or attractions. false if the user is asking about jokes, weather, unrelated news, or non-Marriott topics.
-        2. "activeLocation": Identify the CURRENT city/cities. If follow-up, use most recent.
-        3. "isFollowUp": true if this query relies on previous context.
-        4. "needsSync": true if new data is required.
-        5. "userProfileUpdate": Extract new preferences.
-        6. "reasoning": Explain your logic.
+        1. "inScope": true/false.
+        2. "activeLocation": Identify the city. If it's a follow-up (e.g. "which is cheaper?"), STRICTLY USE "${lastOfferedCity}" unless a new city is mentioned in the query.
+        3. "isFollowUp": true if this builds on the previous turn.
+        4. "needsSync": true if location data is missing.
+        5. "userProfileUpdate": Extract new preferences. If the user contradicts a past preference (e.g. they now like beaches), UPDATE it. Preferences are DYNAMIC.
+        6. "reasoning": Explain your logic, specifically why you are staying in ${lastOfferedCity} or moving to a new city.
         
         OUTPUT ONLY JSON:
         { 
