@@ -99,8 +99,9 @@ export class WorkflowManager {
       ? plan.activeLocation.split(',').map((l: string) => l.trim().toLowerCase()) 
       : [];
     
-    if (plan.needsSync && locations.length > 0) {
+    if (locations.length > 0) {
       for (const loc of locations) {
+        // HotelsAgent now internally decides if sync is needed based on objective coverage
         await hotelsAgent.syncLocation(loc, scraperService, llmService);
       }
     }
