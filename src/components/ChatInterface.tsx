@@ -134,6 +134,11 @@ export default function ChatInterface() {
                         </p>
                       );
                     }
+
+                    // Fallback for regular lines
+                    return (
+                      <p key={i} dangerouslySetInnerHTML={{ __html: formatted }} style={{ marginBottom: '4px' }} />
+                    );
                   })}
                 </div>
                 
