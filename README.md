@@ -1,50 +1,61 @@
-# Marriott Lumina AI Agent
+# Marriott Lumina AI Concierge 🏨✨
 
-Marriott Lumina is a high-end AI concierge POC built for Marriott International. It leverages the **WAT (Workflow, Agent, Tools)** framework to provide guests with a seamless, secure, and personalized experience.
+Marriott Lumina is a state-of-the-art, **fully autonomous AI concierge** designed to provide a premium, personalized hotel discovery experience across the global Marriott Bonvoy portfolio.
 
-## ✨ Features
+## 🚀 Key Features
 
-- **Multi-Agent Architecture**:
-  - **User Agent**: Manages user memory, personalization, and security monitoring.
-  - **Hotels Agent**: Handles property data retrieval, consistency checks, and availability.
-- **WAT Framework**: Structured workflows that ensure polite, scoped, and interactive responses.
-- **Security & Privacy**: Built-in prompt hardening, rate limiting, and scope enforcement (Marriott properties only).
-- **Interactive Experience**: Premium UI with suggested questions and dynamic hotel information cards.
-- **Data Lake Ready**: Session and hotel data exported to Parquet files for easy ingestion and analysis.
+- **Total Autonomy**: No hardcoded destinations. Lumina autonomously discovers, learns, and persists Marriott property data from any city or country on earth in real-time.
+- **Adaptive Memory**: The agent "learns" guest preferences (likes/dislikes) during conversation and automatically tailors all future recommendations to match the user's unique profile.
+- **Agentic Reasoning Engine**: Powered by a Chain-of-Thought brain that analyzes user intent, handles multi-city comparisons, and manages complex context switches seamlessly.
+- **Real-Time Global Sync**: Integrated with **Firecrawl** to perform live extractions from Marriott's official directories, ensuring up-to-the-minute accuracy on ratings, amenities, and pricing.
+- **Premium Branded UI**: A luxury-focused chat interface with gold-accented typography and glassmorphism, optimized for high-end hospitality interactions.
 
-## 🛠 Tech Stack
+## 🛠 Technology Stack
 
-- **Frontend**: Next.js 15+, React, Framer Motion, Vanilla CSS (Premium Glassmorphism).
-- **Backend**: Next.js API Routes (Serverless).
-- **Database**: Prisma with SQLite (for POC portability).
-- **Intelligence**: Integrated with Claude API / Ollama.
-- **Tools**: Firecrawl (Scraping), ParquetJS (Data Export).
+- **Framework**: Next.js 15 (App Router)
+- **Intelligence**: Anthropic Claude 3.5 Sonnet (Reasoning & Response)
+- **Discovery**: Firecrawl (Real-time Scraping & Ingestion)
+- **Database**: Prisma + SQLite (Persistent Learning Store)
+- **Styling**: Vanilla CSS (Custom Marriott Brand System)
 
-## 🚀 Getting Started
+## 🏗 Setup & Installation
 
-1. Clone the repository.
-2. Install dependencies:
+1. **Clone the repository**:
    ```bash
-   npm install
+   git clone https://github.com/kethanpabbi/Marriott-Agent.git
+   cd Marriott-Agent
    ```
-3. Setup the database:
+
+2. **Environment Configuration**:
+   Create a `.env.local` file with the following:
+   ```env
+   ANTHROPIC_API_KEY=your_key
+   FIRECRAWL_API_KEY=your_key
+   DATABASE_URL="file:./dev.db"
+   ```
+
+3. **Initialize Database**:
    ```bash
-   npx prisma generate
    npx prisma db push
    ```
-4. Configure your environment:
-5. Run the development server:
+
+4. **Launch the Experience**:
    ```bash
    npm run dev
    ```
 
+## 🧠 Autonomous Intelligence
+Lumina does not rely on static databases. When a guest asks about a new location, the agent:
+1. **Detects** the new destination via its Reasoning Engine.
+2. **Executes** a live discovery sync.
+3. **Ingests** the results into its long-term memory (DB).
+4. **Responds** with high-context, personalized data.
+
 ## 🔒 Security Policy
-
-This agent is designed with security as a priority:
-
-- No sensitive guest information leakage.
-- Polite refusal for out-of-scope queries.
-- Input sanitization to prevent prompt injection and payload execution.
+Built with enterprise-grade security:
+- **Scope Enforcement**: Strictly limited to Marriott Bonvoy portfolio.
+- **Privacy Protection**: No sensitive guest data leakage.
+- **Injection Defense**: Robust sanitization of all LLM inputs.
 
 ---
 Built as a POC for Marriott International.
