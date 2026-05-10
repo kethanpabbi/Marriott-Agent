@@ -109,7 +109,7 @@ export class HotelsAgent {
       The user is looking for ALL Marriott Bonvoy hotels in: ${location}.
       
       I have scraped live Marriott directories:
-      ${deepScrapeContent.slice(0, 25000)}
+      ${deepScrapeContent.slice(0, 20000)}
 
       TASK:
       1. Extract EVERY unique Marriott property name mentioned in the text.
@@ -117,13 +117,24 @@ export class HotelsAgent {
       3. Identify at least 7-10 properties if they are listed.
       4. DO NOT use internal knowledge from before 2024. Use ONLY the scraped text.
       
-      OUTPUT ONLY JSON:
+      OUTPUT ONLY JSON. NO CONVERSATIONAL TEXT. NO PREAMBLE.
+      
+      JSON FORMAT:
       { "hotels": [{ "name": string, "price": string, "amenities": string[], "description": string, "rating": number }] }
     `;
 
     try {
       const discoveryResponse = await llmService.generateResponse([{ role: 'user', content: discoveryPrompt }]);
-      const jsonStr = discoveryResponse.match(/\{[\s\S]*\}/)?.[0] || discoveryResponse;
+      
+      // Extract JSON block more reliably
+      const startIdx = discoveryResponse.indexOf('{');
+      const endIdx = discoveryResponse.lastIndexOf('}');
+      
+      if (startIdx === -1 || endIdx === -1) {
+        throw new Error("Could not find JSON block in LLM response");
+      }
+
+      const jsonStr = discoveryResponse.substring(startIdx, endIdx + 1);
       const discovered = JSON.parse(jsonStr);
 
       if (discovered.hotels && discovered.hotels.length > 0) {
