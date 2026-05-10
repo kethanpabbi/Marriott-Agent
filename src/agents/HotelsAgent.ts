@@ -149,7 +149,7 @@ export class HotelsAgent {
               restaurants: "Marriott Signature Dining",
               activities: `Experience ${location}`,
               region: "Global Discovery",
-              rating: h.rating || (4.5 + (Math.random() * 0.4))
+              rating: h.rating || 0.0 // Removed random fake rating logic
             },
             create: {
               name: h.name,
@@ -160,7 +160,7 @@ export class HotelsAgent {
               restaurants: "Marriott Signature Dining",
               activities: `Experience ${location}`,
               region: "Global Discovery",
-              rating: h.rating || (4.5 + (Math.random() * 0.4))
+              rating: h.rating || 0.0
             }
           });
         }
