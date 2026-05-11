@@ -75,16 +75,34 @@ export class HotelsAgent {
       const ddgContent = await ddgRes.text();
 
       // 2. Extract Booking.com Marriott city URL from DDG results
+      //    DDG sometimes shows the plain URL, sometimes encodes it in uddg= redirect params
       //    Format: https://www.booking.com/marriott/city/{iso-code}/{city}.html
-      const bookingMatch = ddgContent.match(
+      let bookingUrl: string | null = null;
+
+      // Try plain URL first
+      const plainMatch = ddgContent.match(
         /https?:\/\/www\.booking\.com\/marriott\/city\/[a-z]{2}\/[a-z0-9\-]+\.html/i
       );
+      if (plainMatch) bookingUrl = plainMatch[0];
 
-      if (!bookingMatch) {
+      // Try plain domain without protocol (DDG sometimes omits https)
+      if (!bookingUrl) {
+        const domainMatch = ddgContent.match(/www\.booking\.com\/marriott\/city\/[a-z]{2}\/[a-z0-9\-]+\.html/i);
+        if (domainMatch) bookingUrl = `https://${domainMatch[0]}`;
+      }
+
+      // Fallback: decode from uddg= encoded redirect parameter
+      if (!bookingUrl) {
+        const encodedMatch = ddgContent.match(
+          /uddg=(https?%3A%2F%2Fwww\.booking\.com%2Fmarriott%2Fcity%2F[a-z]{2}%2F[^&\s"')]+\.html)/i
+        );
+        if (encodedMatch) bookingUrl = decodeURIComponent(encodedMatch[1]);
+      }
+
+      if (!bookingUrl) {
         throw new Error(`Could not find a Booking.com Marriott page for "${location}" in search results`);
       }
 
-      const bookingUrl = bookingMatch[0];
       console.log(`🔗 Found Booking.com page: ${bookingUrl}`);
 
       // Derive country from URL: /marriott/city/{iso-code}/{city}.html
