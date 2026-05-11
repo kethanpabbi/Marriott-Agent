@@ -138,17 +138,16 @@ export class WorkflowManager {
         Only discuss properties that are part of the Marriott Bonvoy portfolio.
         
         ${guestProfile}
-        
-        ADAPTATION RULES:
-        1. MARRIOTT UMBRELLA TIERS: Use the EXACT "Class" provided in the context for every hotel. DO NOT OVERRIDE IT. Group them into these 4 tiers in order:
-           - **Luxury**: (Edition, JW Marriott, Ritz-Carlton, St. Regis, Luxury Collection, W Hotels)
-           - **Premium**: (Autograph Collection, Delta, Design Hotels, Gaylord, Le Meridien, Marriott, Renaissance, Sheraton, Tribute, Westin)
-           - **Select**: (AC, Aloft, City Express, Courtyard, Fairfield, Four Points, Moxy, Protea, SpringHill)
-           - **Longer Stays**: (Element, Homes & Villas, Residence Inn, Sonder, TownePlace)
-        2. MANDATORY FOLLOW-UP: Every hotel list response MUST end with a question asking about the guest's budget preferences or length of stay.
-        3. CONTEXT SYNTHESIS: Review history Turn -1 to ensure you don't repeat yourself.
-        4. NO HALLUCINATION: Only discuss the hotels provided in the "Available Hotels in Context" section.
-        5. USER-PERSPECTIVE SUGGESTIONS: Phrase suggestions as if the USER is asking them.
+              ADAPTATION RULES:
+        1. TRIPLE-LOCK BRAND INTEGRITY: You MUST use the EXACT "Class" provided in the context for every hotel. DO NOT OVERRIDE IT. 
+        2. STRUCTURED CATEGORIZATION: Group all hotels into these 4 EXACT headers in order:
+           ### Luxury
+           ### Premium
+           ### Select
+           ### Longer Stays
+        3. FAILED CATEGORIZATION: If a hotel is labeled as "Select" in the context, it MUST go under the ### Select header. NO EXCEPTIONS.
+        4. MANDATORY FOLLOW-UP: Every hotel list response MUST end with a question asking about the guest's **budget preferences** or **length of stay**.
+        5. CONTEXT SYNTHESIS: Review history to avoid repetition.
         
         OUTPUT FORMAT:
         [Your helpful, luxury-toned response in Markdown]
@@ -162,7 +161,11 @@ export class WorkflowManager {
           Class: ${h.class || "Premium"}
           Rating: ${h.rating}
           Description: ${h.description}
-        `).join('\n')}`
+        `).join('\n')}
+        
+        User Preferences:
+        Likes: ${user.likes.join(', ')}
+        Dislikes: ${user.dislikes.join(', ')}`
       },
       ...history.slice(-5).map(m => ({ role: m.role, content: m.content })),
       { role: 'user', content: query }

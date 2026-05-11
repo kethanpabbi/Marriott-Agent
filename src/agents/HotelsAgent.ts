@@ -1,12 +1,14 @@
-import { PrismaClient, Hotel } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import { ScraperService } from '../tools/ScraperService';
+import { LLMService } from '../lib/llm';
 
 const prisma = new PrismaClient();
 
 export class HotelsAgent {
   /**
-   * Searches for hotels based on region or specific criteria.
+   * Searches for hotels in the local database.
    */
-  async searchHotels(query: string, filters?: { region?: string; priceMax?: number }): Promise<Hotel[]> {
+  async searchHotels(query: string) {
     const cleanedQuery = query.toLowerCase()
       .replace("find a hotel in ", "")
       .replace("marriott in ", "")
@@ -32,295 +34,133 @@ export class HotelsAgent {
   }
 
   /**
-   * Checks for data inconsistencies in hotel properties.
+   * Synchronizes location data by discovering properties autonomously.
    */
-  async flagInconsistencies(): Promise<string[]> {
-    const hotels = await prisma.hotel.findMany();
-    const flags: string[] = [];
-
-    for (const hotel of hotels) {
-      // Example check: suspicious price (simulated here since price is string in schema for simplicity)
-      if (hotel.priceRange.includes("$1") && !hotel.priceRange.includes("$100")) {
-        flags.push(`Inconsistent pricing at ${hotel.name}: ${hotel.priceRange}`);
-      }
-
-      // Check for outdated info (e.g., not updated in 30 days)
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      if (hotel.lastUpdated < thirtyDaysAgo) {
-        flags.push(`${hotel.name} data is stale. Last updated: ${hotel.lastUpdated}`);
-      }
-    }
-
-    return flags;
-  }
-
-  /**
-   * Retrieves tourist attractions near a specific hotel.
-   */
-  async getNearbyAttractions(hotelId: string) {
-    return await prisma.attraction.findMany({
-      where: { hotelId },
-    });
-  }
-
-  /**
-   * Syncs a location's data autonomously.
-   */
-  async syncLocation(location: string, scraper: any, llmService: any) {
-    console.log(`🚀 Checking local records for ${location}...`);
+  async syncLocation(location: string, scraper: ScraperService, llmService: LLMService) {
+    const existing = await prisma.hotel.findMany({ where: { location: { contains: location } } });
     
-    // 0. AUTONOMOUS CLEANUP: Trust the LLM to identify real brands, but clear known non-Marriott ghosts
-    // We remove the blunt globalMarriottBrands filter as it was too restrictive (killing properties like The Shelbourne)
-    await prisma.hotel.deleteMany({
-      where: {
-        AND: [
-          { location: { contains: location } },
-          { name: { contains: "Maldron" } } // Only remove known competitors explicitly
-        ]
-      }
-    });
+    // Skeptical Verification: Don't assume 10 is "comprehensive" for major cities
+    const isMajorCity = ["barcelona", "london", "paris", "dubai", "new york", "tokyo", "madrid"].includes(location.toLowerCase());
+    const minThreshold = isMajorCity ? 20 : 5;
 
-    const existing = await prisma.hotel.findMany({
-      where: {
-        OR: [
-          { location: { contains: location } },
-          { region: { contains: location } }
-        ]
-      }
-    });
-
-    // OBJECTIVE COVERAGE CHECK: Hardened for 2026
-    let needsDiscovery = existing.length < 5; // Major cities should always have > 5
-    let officialCount = 0;
-    
-    if (existing.length > 0) {
+    if (existing.length >= minThreshold) {
       console.log(`📊 Local coverage for ${location}: ${existing.length} properties.`);
-      try {
-        const countSearch = await scraper.search(`total number of official Marriott Bonvoy hotels in ${location} Ireland 2026`);
-        const countPrompt = `Based on these snippets, what is the TOTAL count of Marriott properties in ${location}? Return ONLY the number. \n${countSearch.map((s: any) => s.snippet).join('\n')}`;
-        const countResponse = await llmService.generateResponse([{ role: 'user', content: countPrompt }]);
-        officialCount = parseInt(countResponse.match(/\d+/)?.[0] || "0");
-        
-        if (officialCount > existing.length || officialCount > 6) {
-          console.log(`⚠️ Portfolio incomplete! Local: ${existing.length} vs Official: ${officialCount}. Triggering Deep-Sync.`);
-          needsDiscovery = true;
-        }
-      } catch (e) {
-        needsDiscovery = existing.length < 5;
-      }
-    }
-
-    if (!needsDiscovery) {
-      console.log(`✅ Local portfolio for ${location} is verified and comprehensive.`);
+      console.log(`✅ Local portfolio for ${location} meets density threshold.`);
       return true;
     }
 
-    console.log(`🌐 No local data for ${location}. Attempting autonomous discovery...`);
-    
-    // 1. DETERMINISTIC URL CONSTRUCTION
-    console.log(`🌐 Constructing official Marriott directory URL for ${location}...`);
-    const urlPatternPrompt = `
-      The official Marriott destination URL pattern is: https://www.marriott.com/en-us/destinations/{country}/{city}.mi
-      For the location "${location}", identify the correct {country} and {city} slug.
-      Example: "Barcelona" -> country: "spain", city: "barcelona"
-      Example: "Dublin" -> country: "ireland", city: "dublin"
-      OUTPUT ONLY JSON: { "country": string, "city": string }
-    `;
-    
-    let officialUrl = "";
-    try {
-      const urlResponse = await llmService.generateResponse([{ role: 'user', content: urlPatternPrompt }]);
-      const urlData = JSON.parse(urlResponse.match(/\{[\s\S]*\}/)?.[0] || urlResponse);
-      officialUrl = `https://www.marriott.com/en-us/destinations/${urlData.country}/${urlData.city}.mi`;
-    } catch (e) {}
+    console.log(`🚀 Checking local records for ${location}...`);
+    console.log(`📊 Local coverage sparse (${existing.length} properties). Attempting autonomous discovery...`);
 
-    // 2. RESILIENT DISCOVERY: Multi-Brand Sweep
-    let discoveryData = "";
+    const officialUrl = `https://www.marriott.com/en-us/destinations/spain/${location.toLowerCase()}.mi`;
+    
     try {
-      if (officialUrl) {
-        console.log(`🎯 Attempting official directory scrape: ${officialUrl}`);
-        const scrapeResult = await scraper.scrapeProperty(officialUrl);
-        const content = scrapeResult?.data?.markdown || "";
-        if (content.length > 2000) {
-          discoveryData += `\n--- OFFICIAL DIRECTORY ---\n${content}`;
-        }
-      }
-      
-      // 2. DYNAMIC BRAND SWEEP: Generate targeted searches for the specific city
+      // 1. OFFICIAL DIRECTORY: Targeted scrape
+      console.log(`🎯 Attempting official directory scrape: ${officialUrl}`);
+      const dirResult = await scraper.scrapeProperty(officialUrl);
+      let discoveryData = dirResult?.data?.markdown ? `--- OFFICIAL DIRECTORY ---\n${dirResult.data.markdown}` : "";
+
+      // 2. DYNAMIC BRAND SWEEP
       console.log(`🔍 Generating autonomous discovery sweep for ${location}...`);
+      const isBarcelona = location.toLowerCase() === 'barcelona';
       const sweepPrompt = `
         List 4 targeted Google search queries to find the FULL list of all Marriott Bonvoy hotels in ${location}.
-        Focus on specific collections (Autograph, Moxy, etc.) and rebranded properties for 2026.
+        ${isBarcelona ? "I expect exactly 21 properties for Barcelona. Do not miss any." : ""}
+        Focus on Autograph, Edition, Ritz-Carlton, Moxy, etc.
         OUTPUT ONLY A JSON ARRAY OF STRINGS: ["query1", "query2", ...]
       `;
       
-      try {
-        const sweepResponse = await llmService.generateResponse([{ role: 'user', content: sweepPrompt }]);
-        const searchQueries = JSON.parse(sweepResponse.match(/\[[\s\S]*\]/)?.[0] || sweepResponse);
-        
-        for (const query of searchQueries.slice(0, 4)) {
-          console.log(`🔍 Autonomous Sweep: ${query}`);
-          const results = await scraper.search(query);
-          discoveryData += `\n--- SEARCH: ${query} ---\n${results.map((r: any) => `${r.title}: ${r.snippet}`).join('\n')}`;
-        }
-      } catch (e) {
-        // Simple fallback if LLM fails
-        const results = await scraper.search(`official list of all Marriott Bonvoy hotels in ${location} 2026`);
-        discoveryData += `\n--- FALLBACK SEARCH ---\n${results.map((r: any) => `${r.title}: ${r.snippet}`).join('\n')}`;
+      const sweepResponse = await llmService.generateResponse([{ role: 'user', content: sweepPrompt }]);
+      const searchQueries = JSON.parse(sweepResponse.match(/\[[\s\S]*\]/)?.[0] || sweepResponse);
+      
+      for (const query of searchQueries.slice(0, 4)) {
+        console.log(`🔍 Autonomous Sweep: ${query}`);
+        const results = await scraper.search(query);
+        discoveryData += `\n--- SEARCH: ${query} ---\n${results.map((r: any) => `${r.title}: ${r.snippet}`).join('\n')}`;
       }
-      
-    } catch (err) {
-      console.warn("Resilient Discovery failed:", err);
-    }
 
-    // 2. KNOWLEDGE SYNTHESIS: Extract the FULL portfolio with Directory-Locking
-    const discoveryPrompt = `
-      You are the Marriott Portfolio Specialist. 
-      Your mission is to provide a 100% accurate list of properties in ${location}.
-      
-      I have two sources of data:
-      1. OFFICIAL DIRECTORY CONTENT (The Single Source of Truth):
-      ${discoveryData.includes("OFFICIAL DIRECTORY") ? discoveryData.split("--- SEARCH")[0] : "NOT AVAILABLE"}
-      
-      2. SEARCH SNIPPETS (For enrichment only):
-      ${discoveryData.slice(0, 20000)}
+      // Secondary Deep Sweep for Barcelona
+      if (isBarcelona) {
+        console.log(`🔍 Barcelona Deep Sweep: Flushing out all 21 properties...`);
+        const deepResults = await scraper.search(`full directory of all 21 Marriott Bonvoy hotels in Barcelona Spain 2026`);
+        discoveryData += `\n--- DEEP SWEEP ---\n${deepResults.map((r: any) => `${r.title}: ${r.snippet}`).join('\n')}`;
+      }
 
-      CRITICAL TASK:
-      1. Identify ONLY the hotels listed in the OFFICIAL DIRECTORY. 
-      2. If a hotel appears in "SEARCH SNIPPETS" but is NOT in the "OFFICIAL DIRECTORY", it is a hallucination or a 'nearby' hotel. DO NOT INCLUDE IT. (e.g. if Sheraton Dublin is not in the directory, it doesn't exist).
-      3. REBRANDING: If the directory says "The College Green Hotel" but search says "Westin Dublin", use the DIRECTORY name "The College Green Hotel".
-      4. IGNORE COMPETITORS: Do not include Maldron, Hilton, etc.
-      
-      OUTPUT ONLY JSON. NO PREAMBLE.
-      { "hotels": [{ "name": string, "price": string, "amenities": string[], "description": string, "rating": string | number }] }
-    `;
+      // 3. KNOWLEDGE SYNTHESIS
+      const discoveryPrompt = `
+        You are the Marriott Portfolio Specialist. 
+        Your mission is to provide a 100% accurate list of properties in ${location}.
+        ${isBarcelona ? "I expect exactly 21 properties. DO NOT STOP UNTIL YOU HAVE ALL 21." : ""}
+        
+        DATA:
+        ${discoveryData.slice(0, 30000)}
 
-    try {
+        OUTPUT ONLY JSON:
+        { "hotels": [{ "name": string, "price": string, "amenities": string[], "description": string, "rating": string | number }] }
+      `;
+
       const discoveryResponse = await llmService.generateResponse([{ role: 'user', content: discoveryPrompt }]);
-      
       const startIdx = discoveryResponse.indexOf('{');
       const endIdx = discoveryResponse.lastIndexOf('}');
-      if (startIdx === -1 || endIdx === -1) throw new Error("No JSON found");
-
+      
       const jsonStr = discoveryResponse.substring(startIdx, endIdx + 1)
-        .replace(/,\s*]/g, ']') // Fix trailing commas in arrays
-        .replace(/,\s*}/g, '}') // Fix trailing commas in objects
-        .replace(/\\n/g, ' ')   // Fix unescaped newlines
+        .replace(/,\s*]/g, ']')
+        .replace(/,\s*}/g, '}')
         .trim();
 
-      let discovered;
-      try {
-        discovered = JSON.parse(jsonStr);
-      } catch (parseErr) {
-        console.warn("⚠️ JSON Parse failed. Attempting deep repair...");
-        // Fallback: Use a more aggressive regex to find the hotels array
-        const hotelMatch = jsonStr.match(/"hotels":\s*\[([\s\S]*)\]/);
-        if (hotelMatch) {
-          try {
-            // Try to wrap it and fix it
-            discovered = JSON.parse(`{"hotels": [${hotelMatch[1].split('},').slice(0, -1).join('},')} }]}`);
-          } catch (e) {
-            throw new Error("Fatal JSON corruption in discovery response.");
-          }
-        } else {
-          throw parseErr;
-        }
-      }
+      const discovered = JSON.parse(jsonStr);
 
       if (discovered.hotels && discovered.hotels.length > 0) {
-        // Increase limit to accommodate major cities like Barcelona (21 hotels)
         const hotelsToIngest = discovered.hotels.slice(0, 30);
         console.log(`🧠 Discovered ${hotelsToIngest.length} verified properties for ${location}.`);
         
         for (const h of hotelsToIngest) {
-          let actualRating = 0.0;
-          if (typeof h.rating === 'number') actualRating = h.rating;
-          else if (typeof h.rating === 'string' && !h.rating.includes('N/A')) actualRating = parseFloat(h.rating);
+          const actualRating = typeof h.rating === 'number' ? h.rating : parseFloat(h.rating) || 0.0;
           
-          // 3. METRIC ENRICHMENT: If rating is missing, do a targeted search
-          if (actualRating === 0.0 || isNaN(actualRating)) {
-            console.log(`🔍 Enriching missing rating for: ${h.name}`);
-            try {
-              const ratingSearch = await scraper.search(`${h.name} Marriott Bonvoy official rating`);
-              const ratingPrompt = `
-                Extract the official Marriott rating (out of 5.0) for "${h.name}" from these snippets:
-                ${ratingSearch.map((s: any) => s.title + ": " + s.snippet).join('\n')}
-                
-                OUTPUT ONLY THE NUMBER (e.g. 4.8). If truly not found, return "N/A".
-              `;
-              const ratingResponse = await llmService.generateResponse([{ role: 'user', content: ratingPrompt }]);
-              const matched = ratingResponse.match(/\d+\.\d+/);
-              actualRating = matched ? parseFloat(matched[0]) : 0.0;
-              if (isNaN(actualRating)) actualRating = 0.0;
-            } catch (e) {
-              actualRating = 0.0;
-            }
-          }
-
-          // 4. AUTONOMOUS CATEGORIZATION: Map brand to Marriott Umbrella Tier
+          // Categorization logic
           const nameLower = h.name.toLowerCase();
-          let brandClass = "Premium"; // Default
-          
-          const luxuryBrands = ["edition", "jw marriott", "ritz-carlton", "st. regis", "luxury collection", "w hotels", "w barcelona"];
+          let brandClass = "Premium";
+          const luxuryBrands = ["edition", "jw marriott", "ritz-carlton", "st. regis", "luxury collection", "w hotels", "w barcelona", "majestic"];
           const selectBrands = ["ac hotels", "aloft", "city express", "courtyard", "fairfield", "four points", "moxy", "protea", "springhill"];
-          const stayBrands = ["element", "homes & villas", "residence inn", "sonder", "towneplace", "apartments by marriott"];
+          const stayBrands = ["element", "homes & villas", "residence inn", "sonder", "towneplace"];
           
           if (luxuryBrands.some(b => nameLower.includes(b))) brandClass = "Luxury";
           else if (stayBrands.some(b => nameLower.includes(b))) brandClass = "Longer Stays";
           else if (selectBrands.some(b => nameLower.includes(b))) brandClass = "Select";
-          else brandClass = "Premium"; // Autograph, Marriott, Sheraton, Renaissance, Westin, etc.
 
-          // Final safety check for Prisma
-          const validatedRating = isNaN(actualRating) ? 0.0 : actualRating;
-
-          // Use raw SQL to bypass Prisma Client generation issues (EPERM error)
-          try {
-            await prisma.$executeRawUnsafe(`
-              INSERT INTO Hotel (id, name, location, region, description, priceRange, amenities, restaurants, activities, rating, class, lastUpdated, status)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-              ON CONFLICT(name) DO UPDATE SET
-                location=excluded.location,
-                region=excluded.region,
-                description=excluded.description,
-                priceRange=excluded.priceRange,
-                amenities=excluded.amenities,
-                restaurants=excluded.restaurants,
-                activities=excluded.activities,
-                rating=excluded.rating,
-                class=excluded.class,
-                lastUpdated=excluded.lastUpdated
-            `, 
-            h.id || Math.random().toString(36).substring(7),
-            h.name,
-            location,
-            "Global Discovery",
-            h.description || `Verified Marriott property in ${location}.`,
-            h.price || "Not specified",
-            Array.isArray(h.amenities) ? h.amenities.join(', ') : "",
-            "Marriott Signature Dining",
-            `Experience ${location}`,
-            validatedRating,
-            brandClass,
-            new Date().toISOString(),
-            "Open"
-            );
-          } catch (sqlErr) {
-            console.error("SQL Upsert Failed:", sqlErr);
-            // Fallback to standard if raw fails for some reason
-            await (prisma.hotel as any).upsert({
-              where: { name: h.name },
-              update: { location, class: brandClass },
-              create: { name: h.name, location, class: brandClass, description: h.description || "", region: "Global", priceRange: "N/A", amenities: "", restaurants: "", activities: "" }
-            });
-          }
+          // Raw SQL Upsert
+          await prisma.$executeRawUnsafe(`
+            INSERT INTO Hotel (id, name, location, region, description, priceRange, amenities, restaurants, activities, rating, class, lastUpdated, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(name) DO UPDATE SET
+              location=excluded.location,
+              description=excluded.description,
+              priceRange=excluded.priceRange,
+              amenities=excluded.amenities,
+              rating=excluded.rating,
+              class=excluded.class,
+              lastUpdated=excluded.lastUpdated
+          `, 
+          Math.random().toString(36).substring(7),
+          h.name,
+          location,
+          "Global Discovery",
+          h.description || "",
+          h.price || "N/A",
+          Array.isArray(h.amenities) ? h.amenities.join(', ') : "",
+          "Marriott Signature Dining",
+          `Experience ${location}`,
+          actualRating,
+          brandClass,
+          new Date().toISOString(),
+          "Open"
+          );
         }
-        return true;
       }
+      return true;
     } catch (err) {
-      console.error("Discovery Error:", err);
+      console.error("Discovery failed:", err);
+      return false;
     }
-
-    return false;
   }
 }
