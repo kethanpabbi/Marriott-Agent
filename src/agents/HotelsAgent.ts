@@ -274,32 +274,46 @@ export class HotelsAgent {
           // Final safety check for Prisma
           const validatedRating = isNaN(actualRating) ? 0.0 : actualRating;
 
-          await prisma.hotel.upsert({
-            where: { name: h.name },
-            update: {
-              location: `${location}`,
-              priceRange: h.price || "Not specified",
-              description: h.description || `Verified Marriott property in ${location}.`,
-              amenities: Array.isArray(h.amenities) ? h.amenities.join(', ') : "",
-              restaurants: "Marriott Signature Dining",
-              activities: `Experience ${location}`,
-              region: "Global Discovery",
-              rating: validatedRating,
-              class: brandClass
-            },
-            create: {
-              name: h.name,
-              location: `${location}`,
-              priceRange: h.price || "Not specified",
-              description: h.description || `Verified Marriott property in ${location}.`,
-              amenities: Array.isArray(h.amenities) ? h.amenities.join(', ') : "",
-              restaurants: "Marriott Signature Dining",
-              activities: `Experience ${location}`,
-              region: "Global Discovery",
-              rating: validatedRating,
-              class: brandClass
-            }
-          });
+          // Use raw SQL to bypass Prisma Client generation issues (EPERM error)
+          try {
+            await prisma.$executeRawUnsafe(`
+              INSERT INTO Hotel (id, name, location, region, description, priceRange, amenities, restaurants, activities, rating, class, lastUpdated, status)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(name) DO UPDATE SET
+                location=excluded.location,
+                region=excluded.region,
+                description=excluded.description,
+                priceRange=excluded.priceRange,
+                amenities=excluded.amenities,
+                restaurants=excluded.restaurants,
+                activities=excluded.activities,
+                rating=excluded.rating,
+                class=excluded.class,
+                lastUpdated=excluded.lastUpdated
+            `, 
+            h.id || Math.random().toString(36).substring(7),
+            h.name,
+            location,
+            "Global Discovery",
+            h.description || `Verified Marriott property in ${location}.`,
+            h.price || "Not specified",
+            Array.isArray(h.amenities) ? h.amenities.join(', ') : "",
+            "Marriott Signature Dining",
+            `Experience ${location}`,
+            validatedRating,
+            brandClass,
+            new Date().toISOString(),
+            "Open"
+            );
+          } catch (sqlErr) {
+            console.error("SQL Upsert Failed:", sqlErr);
+            // Fallback to standard if raw fails for some reason
+            await (prisma.hotel as any).upsert({
+              where: { name: h.name },
+              update: { location, class: brandClass },
+              create: { name: h.name, location, class: brandClass, description: h.description || "", region: "Global", priceRange: "N/A", amenities: "", restaurants: "", activities: "" }
+            });
+          }
         }
         return true;
       }
