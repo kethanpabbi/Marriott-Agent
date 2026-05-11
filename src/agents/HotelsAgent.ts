@@ -39,33 +39,47 @@ export class HotelsAgent {
   async syncLocation(location: string, scraper: ScraperService, llmService: LLMService) {
     const existing = await prisma.hotel.findMany({ where: { location: { contains: location } } });
     
-    // Skeptical Verification: Don't assume 10 is "comprehensive" for major cities
-    const isMajorCity = ["barcelona", "london", "paris", "dubai", "new york", "tokyo", "madrid"].includes(location.toLowerCase());
-    const minThreshold = isMajorCity ? 20 : 5;
+    // 1. AUTONOMOUS DENSITY DETECTION: Ask the web for the official count
+    let officialCount = 0;
+    try {
+      console.log(`🔍 Determining official Marriott property count for ${location}...`);
+      const countSearch = await scraper.search(`total number of official Marriott Bonvoy hotels in ${location} 2026`);
+      const countPrompt = `Based on these snippets, what is the TOTAL count of Marriott properties in ${location}? Return ONLY the number. \n${countSearch.map((s: any) => s.snippet).join('\n')}`;
+      const countResponse = await llmService.generateResponse([{ role: 'user', content: countPrompt }]);
+      officialCount = parseInt(countResponse.match(/\d+/)?.[0] || "0");
+      
+      if (officialCount > 0 && existing.length >= officialCount) {
+        console.log(`📊 Local coverage for ${location}: ${existing.length} properties (Official: ${officialCount}).`);
+        console.log(`✅ Local portfolio for ${location} is verified and complete.`);
+        return true;
+      }
+    } catch (e) {
+      console.warn("Autonomous count detection failed, falling back to threshold logic.");
+    }
 
-    if (existing.length >= minThreshold) {
-      console.log(`📊 Local coverage for ${location}: ${existing.length} properties.`);
-      console.log(`✅ Local portfolio for ${location} meets density threshold.`);
+    // 2. DYNAMIC THRESHOLD FALLBACK
+    if (existing.length >= 10 && officialCount === 0) {
+      console.log(`📊 Local coverage for ${location}: ${existing.length} properties. Assuming comprehensive.`);
       return true;
     }
 
     console.log(`🚀 Checking local records for ${location}...`);
-    console.log(`📊 Local coverage sparse (${existing.length} properties). Attempting autonomous discovery...`);
+    console.log(`📊 Coverage sparse (${existing.length}/${officialCount || '?'}). Attempting autonomous discovery...`);
 
-    const officialUrl = `https://www.marriott.com/en-us/destinations/spain/${location.toLowerCase()}.mi`;
+    const officialUrl = `https://www.marriott.com/en-us/destinations/`; // Generic start
     
     try {
       // 1. OFFICIAL DIRECTORY: Targeted scrape
       console.log(`🎯 Attempting official directory scrape: ${officialUrl}`);
+      // Note: In production, we'd autonomously find the country first to construct the full .mi URL
       const dirResult = await scraper.scrapeProperty(officialUrl);
       let discoveryData = dirResult?.data?.markdown ? `--- OFFICIAL DIRECTORY ---\n${dirResult.data.markdown}` : "";
 
       // 2. DYNAMIC BRAND SWEEP
       console.log(`🔍 Generating autonomous discovery sweep for ${location}...`);
-      const isBarcelona = location.toLowerCase() === 'barcelona';
       const sweepPrompt = `
         List 4 targeted Google search queries to find the FULL list of all Marriott Bonvoy hotels in ${location}.
-        ${isBarcelona ? "I expect exactly 21 properties for Barcelona. Do not miss any." : ""}
+        ${officialCount > 0 ? `I expect at least ${officialCount} properties.` : "Find as many as possible."}
         Focus on Autograph, Edition, Ritz-Carlton, Moxy, etc.
         OUTPUT ONLY A JSON ARRAY OF STRINGS: ["query1", "query2", ...]
       `;
@@ -79,10 +93,10 @@ export class HotelsAgent {
         discoveryData += `\n--- SEARCH: ${query} ---\n${results.map((r: any) => `${r.title}: ${r.snippet}`).join('\n')}`;
       }
 
-      // Secondary Deep Sweep for Barcelona
-      if (isBarcelona) {
-        console.log(`🔍 Barcelona Deep Sweep: Flushing out all 21 properties...`);
-        const deepResults = await scraper.search(`full directory of all 21 Marriott Bonvoy hotels in Barcelona Spain 2026`);
+      // Secondary Deep Sweep if count is expected high
+      if (officialCount > 10) {
+        console.log(`🔍 Deep Sweep: Flushing out all ${officialCount} properties...`);
+        const deepResults = await scraper.search(`full list of all ${officialCount} Marriott Bonvoy hotels in ${location} 2026`);
         discoveryData += `\n--- DEEP SWEEP ---\n${deepResults.map((r: any) => `${r.title}: ${r.snippet}`).join('\n')}`;
       }
 
@@ -90,7 +104,7 @@ export class HotelsAgent {
       const discoveryPrompt = `
         You are the Marriott Portfolio Specialist. 
         Your mission is to provide a 100% accurate list of properties in ${location}.
-        ${isBarcelona ? "I expect exactly 21 properties. DO NOT STOP UNTIL YOU HAVE ALL 21." : ""}
+        ${officialCount > 0 ? `I expect at least ${officialCount} properties. DO NOT STOP UNTIL COMPLETE.` : "Extract all properties."}
         
         DATA:
         ${discoveryData.slice(0, 30000)}
