@@ -141,11 +141,9 @@ export class HotelsAgent {
     console.log(`🌐 Constructing official Marriott directory URL for ${location}...`);
     const urlPatternPrompt = `
       The official Marriott destination URL pattern is: https://www.marriott.com/en-us/destinations/{country}/{city}.mi
-      For the location "${location}", identify the correct {country} and {city} slug for this URL.
+      For the location "${location}", identify the correct {country} and {city} slug.
       Example: "Barcelona" -> country: "spain", city: "barcelona"
-      Example: "New York" -> country: "usa", city: "new-york-city"
       Example: "Dublin" -> country: "ireland", city: "dublin"
-      
       OUTPUT ONLY JSON: { "country": string, "city": string }
     `;
     
@@ -154,30 +152,28 @@ export class HotelsAgent {
       const urlResponse = await llmService.generateResponse([{ role: 'user', content: urlPatternPrompt }]);
       const urlData = JSON.parse(urlResponse.match(/\{[\s\S]*\}/)?.[0] || urlResponse);
       officialUrl = `https://www.marriott.com/en-us/destinations/${urlData.country}/${urlData.city}.mi`;
-      console.log(`🎯 Targeted official directory: ${officialUrl}`);
-    } catch (e) {
-      console.warn("Failed to construct deterministic URL, falling back to search.");
-    }
+    } catch (e) {}
 
-    // 2. DEEP-SCRAPE: Target the official directory
-    let deepScrapeContent = "";
+    // 2. RESILIENT DISCOVERY: Scrape + Search
+    let discoveryData = "";
     try {
       if (officialUrl) {
+        console.log(`🎯 Attempting official scrape: ${officialUrl}`);
         const scrapeResult = await scraper.scrapeProperty(officialUrl);
-        deepScrapeContent = scrapeResult?.data?.markdown || JSON.stringify(scrapeResult?.data) || "";
-      }
-      
-      // Fallback/Augment with search if directory is sparse
-      if (deepScrapeContent.length < 2000) {
-        console.log("🔍 Directory sparse. Augmenting with targeted search...");
-        const searchResults = await scraper.search(`Marriott Bonvoy hotels in ${location} Ireland official list with ratings`);
-        for (const r of searchResults.slice(0, 2)) {
-          const sResult = await scraper.scrapeProperty(r.url);
-          deepScrapeContent += "\n" + (sResult?.data?.markdown || "");
+        const content = scrapeResult?.data?.markdown || "";
+        if (content.length > 2000) {
+          discoveryData += `\n--- OFFICIAL DIRECTORY ---\n${content}`;
+        } else {
+          console.log("⚠️ Official directory blocked or sparse. Pivoting to search...");
         }
       }
+      
+      // ALWAYS augment with search to ensure 2026 accuracy and bypass blocks
+      const searchResults = await scraper.search(`List of all Marriott Bonvoy hotels in ${location} 2026 official names`);
+      discoveryData += `\n--- VERIFIED SEARCH RESULTS ---\n${searchResults.map((r: any) => `${r.title}: ${r.snippet} (${r.url})`).join('\n')}`;
+      
     } catch (err) {
-      console.warn("Deep-Scrape failed:", err);
+      console.warn("Resilient Discovery failed:", err);
     }
 
     // 2. KNOWLEDGE SYNTHESIS: Extract the FULL portfolio
@@ -185,15 +181,15 @@ export class HotelsAgent {
       You are the Marriott Portfolio Specialist. 
       Identify ALL real Marriott Bonvoy properties in: ${location}.
       
-      LIVE SCRAPED DATA:
-      ${deepScrapeContent.slice(0, 25000)}
+      LIVE DATA (MAY BE FRAGMENTED DUE TO BLOCKS):
+      ${discoveryData.slice(0, 25000)}
 
       TASK:
-      1. Extract EVERY unique Marriott property. According to official records, there are approximately ${needsDiscovery && officialCount > 0 ? officialCount : 'all listed'} properties in this area.
-      2. BRAND CHECK: Only include official Marriott brands (Ritz-Carlton, St. Regis, JW Marriott, W Hotels, Edition, Autograph Collection, Renaissance, Marriott, Sheraton, Delta, Westin, Le Méridien, Gaylord, Courtyard, Four Points, SpringHill Suites, Protea, Fairfield, AC Hotels, Aloft, Moxy, Residence Inn, TownePlace Suites, Element).
-      3. REBRANDING CHECK: Use current 2026 names from the scraped text.
-      4. IGNORE competitors (Hilton, IHG, Hyatt, etc.).
-      5. RATING: Provide actual rating found or "N/A".
+      1. Extract EVERY unique Marriott property. 
+      2. REBRANDING IS CRITICAL: If you see "The College Green Hotel" or "formerly Westin Dublin", USE "The College Green Hotel".
+      3. BRAND CHECK: Only include Marriott brands (Ritz-Carlton, St. Regis, JW, W, Autograph, Renaissance, Marriott, Sheraton, Westin, Aloft, Moxy, etc.).
+      4. IGNORE COMPETITORS (Maldron, Hilton, etc.).
+      5. DATA SOURCE: Trust the LIVE DATA above more than your internal memory. 
       
       OUTPUT ONLY JSON. NO PREAMBLE.
       { "hotels": [{ "name": string, "price": string, "amenities": string[], "description": string, "rating": string | number }] }
