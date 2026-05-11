@@ -214,7 +214,7 @@ export class HotelsAgent {
           else if (typeof h.rating === 'string' && !h.rating.includes('N/A')) actualRating = parseFloat(h.rating);
           
           // 3. METRIC ENRICHMENT: If rating is missing, do a targeted search
-          if (actualRating === 0.0) {
+          if (actualRating === 0.0 || isNaN(actualRating)) {
             console.log(`🔍 Enriching missing rating for: ${h.name}`);
             try {
               const ratingSearch = await scraper.search(`${h.name} Marriott Bonvoy official rating`);
@@ -227,33 +227,37 @@ export class HotelsAgent {
               const ratingResponse = await llmService.generateResponse([{ role: 'user', content: ratingPrompt }]);
               const matched = ratingResponse.match(/\d+\.\d+/);
               actualRating = matched ? parseFloat(matched[0]) : 0.0;
+              if (isNaN(actualRating)) actualRating = 0.0;
             } catch (e) {
               actualRating = 0.0;
             }
           }
 
+          // Final safety check for Prisma
+          const validatedRating = isNaN(actualRating) ? 0.0 : actualRating;
+
           await prisma.hotel.upsert({
             where: { name: h.name },
             update: {
               location: `${location}`,
-              priceRange: h.price,
+              priceRange: h.price || "Not specified",
               description: h.description || `Verified Marriott property in ${location}.`,
-              amenities: h.amenities.join(', '),
+              amenities: Array.isArray(h.amenities) ? h.amenities.join(', ') : "",
               restaurants: "Marriott Signature Dining",
               activities: `Experience ${location}`,
               region: "Global Discovery",
-              rating: actualRating
+              rating: validatedRating
             },
             create: {
               name: h.name,
               location: `${location}`,
-              priceRange: h.price,
+              priceRange: h.price || "Not specified",
               description: h.description || `Verified Marriott property in ${location}.`,
-              amenities: h.amenities.join(', '),
+              amenities: Array.isArray(h.amenities) ? h.amenities.join(', ') : "",
               restaurants: "Marriott Signature Dining",
               activities: `Experience ${location}`,
               region: "Global Discovery",
-              rating: actualRating
+              rating: validatedRating
             }
           });
         }
