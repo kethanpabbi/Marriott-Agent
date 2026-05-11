@@ -69,8 +69,19 @@ export class HotelsAgent {
     try {
       console.log(`🌍 Performing Geo-Lookup for ${location}...`);
       const geoSearch = await scraper.search(`What country is ${location} in for Marriott destinations directory?`);
-      const geoPrompt = `Based on these snippets, what is the country for ${location}? Return ONLY the country name in lowercase (e.g. 'spain', 'ireland', 'united-kingdom'). \n${geoSearch.map((s: any) => s.snippet).join('\n')}`;
-      const country = (await llmService.generateResponse([{ role: 'user', content: geoPrompt }])).toLowerCase().trim().replace(/\s+/g, '-');
+      const geoPrompt = `
+        TASK: Identify the country for ${location}.
+        DATA: ${geoSearch.map((s: any) => s.snippet).join('\n')}
+        
+        OUTPUT ONLY THE COUNTRY NAME (one word, lowercase, hyphenated if needed). 
+        NO EXPLANATION. NO PREAMBLE. NO BOLDING.
+        Correct example: "spain", "united-kingdom", "ireland".
+      `;
+      let country = (await llmService.generateResponse([{ role: 'user', content: geoPrompt }])).toLowerCase().trim();
+      
+      // Sanitization: Extract ONLY the last word or hyphenated slug if the LLM hallucinated a preamble
+      const matches = country.match(/[a-z-]+(?=\s*$|\.*$)/);
+      if (matches) country = matches[0];
       
       officialUrl = `https://www.marriott.com/en-us/destinations/${country}/${location.toLowerCase()}.mi`;
       console.log(`🎯 Constructed Official Directory: ${officialUrl}`);
