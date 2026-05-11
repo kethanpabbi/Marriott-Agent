@@ -13,49 +13,6 @@ function classifyBrand(nameLower: string): string {
   return "Premium";
 }
 
-/**
- * Searches DuckDuckGo Lite via Jina Reader (free, no API key) to find the
- * official Marriott city page URL. DDG results include the Marriott URL in
- * plaintext like: www.marriott.com/en-us/destinations/singapore.mi
- */
-async function findMarriottCityUrl(location: string): Promise<string | null> {
-  try {
-    const query = encodeURIComponent(`Hotels in ${location} Marriott Bonvoy`);
-    const ddgUrl = `https://lite.duckduckgo.com/lite/?q=${query}`;
-    const res = await fetch(`https://r.jina.ai/${ddgUrl}`, {
-      headers: { 'Accept': 'text/plain', 'X-Return-Format': 'markdown' },
-      signal: AbortSignal.timeout(20000),
-    });
-    const text = await res.text();
-
-    // DDG results show the plain domain at the end of each result block, e.g.:
-    //   www.marriott.com/en-us/destinations/singapore.mi
-    // Match with or without the https:// prefix, and handle both:
-    //   /destinations/{city}.mi   (city-states like Singapore)
-    //   /destinations/{country}/{city}.mi  (most cities)
-    const match = text.match(/(?:https?:\/\/)?www\.marriott\.com\/en-us\/destinations\/[a-z0-9][a-z0-9\-\/]*\.mi/i);
-    if (match) {
-      const url = match[0].startsWith('http') ? match[0] : `https://${match[0]}`;
-      // Strip anything appended after .mi (e.g. query strings, trailing punctuation)
-      return url.replace(/\.mi.*$/, '.mi');
-    }
-
-    // Fallback: decode the encoded URL from a DDG redirect link
-    const encodedMatch = text.match(/uddg=(https?%3A%2F%2Fwww\.marriott\.com[^&"'\s)]+)/i);
-    if (encodedMatch) {
-      const decoded = decodeURIComponent(encodedMatch[1]);
-      const trimmed = decoded.replace(/\.mi.*$/, '.mi');
-      if (trimmed.includes('/destinations/')) return trimmed;
-    }
-
-    console.warn(`⚠️ Could not extract Marriott URL from DDG results for "${location}"`);
-    return null;
-  } catch (err) {
-    console.error("DDG search via Jina Reader failed:", err);
-    return null;
-  }
-}
-
 export class HotelsAgent {
   /**
    * Returns hotels for a location sorted by rating (top 10).
@@ -85,14 +42,15 @@ export class HotelsAgent {
 
   /**
    * Syncs a city by:
-   * 1. Searching Google (via Jina Search) for the real Marriott city page URL
-   * 2. Fetching that page via Jina Reader
-   * 3. Extracting all hotels with the LLM
-   * 4. Upserting everything to the DB
+   * 1. Searching DuckDuckGo (via Jina Reader, free) for "Hotels in {city} Marriott Bonvoy"
+   * 2. Extracting the Booking.com Marriott city page URL from results
+   * 3. Fetching that Booking.com page via Jina Reader (Booking.com is accessible; marriott.com is 403-blocked)
+   * 4. LLM extracts all hotels from the page content
+   * 5. Upserts to DB
    * Skips entirely if data is < 7 days old.
    */
   async syncLocation(location: string, llmService: LLMService) {
-    // Staleness check — skip if fresh data exists
+    // Staleness check
     const newest = await prisma.hotel.findFirst({
       where: { location: { contains: location } },
       orderBy: { lastUpdated: 'desc' },
@@ -105,31 +63,52 @@ export class HotelsAgent {
       }
     }
 
-    console.log(`🔍 Finding official Marriott page for "${location}"...`);
+    console.log(`🔍 Searching for Marriott hotels in "${location}"...`);
 
     try {
-      // 1. Find the real URL via Jina Search (Google)
-      const marriottUrl = await findMarriottCityUrl(location);
-      if (!marriottUrl) throw new Error(`Could not find a Marriott city page for "${location}"`);
-      console.log(`🔗 Found: ${marriottUrl}`);
-
-      // Extract country from the URL path: /destinations/{country}/{city}.mi
-      const urlParts = marriottUrl.match(/destinations\/([^/]+)\/([^/.]+)/);
-      const country = urlParts ? urlParts[1] : location;
-
-      // 2. Fetch the page via Jina Reader
-      const pageRes = await fetch(`https://r.jina.ai/${marriottUrl}`, {
+      // 1. DDG search — find the Booking.com Marriott city page
+      const query = encodeURIComponent(`Hotels in ${location} Marriott Bonvoy`);
+      const ddgRes = await fetch(`https://r.jina.ai/https://lite.duckduckgo.com/lite/?q=${query}`, {
         headers: { 'Accept': 'text/plain', 'X-Return-Format': 'markdown' },
-        signal: AbortSignal.timeout(30000),
+        signal: AbortSignal.timeout(20000),
       });
-      if (!pageRes.ok) throw new Error(`Jina Reader fetch failed: ${pageRes.status}`);
+      const ddgContent = await ddgRes.text();
+
+      // 2. Extract Booking.com Marriott city URL from DDG results
+      //    Format: https://www.booking.com/marriott/city/{iso-code}/{city}.html
+      const bookingMatch = ddgContent.match(
+        /https?:\/\/www\.booking\.com\/marriott\/city\/[a-z]{2}\/[a-z0-9\-]+\.html/i
+      );
+
+      if (!bookingMatch) {
+        throw new Error(`Could not find a Booking.com Marriott page for "${location}" in search results`);
+      }
+
+      const bookingUrl = bookingMatch[0];
+      console.log(`🔗 Found Booking.com page: ${bookingUrl}`);
+
+      // Derive country from URL: /marriott/city/{iso-code}/{city}.html
+      const country = bookingUrl.match(/\/city\/([a-z]{2})\//)?.[1] || location;
+
+      // 3. Fetch the Booking.com page via Jina Reader
+      const pageRes = await fetch(`https://r.jina.ai/${bookingUrl}`, {
+        headers: {
+          'Accept': 'text/plain',
+          'X-Return-Format': 'markdown',
+          'X-Timeout': '20',
+        },
+        signal: AbortSignal.timeout(35000),
+      });
+      if (!pageRes.ok) throw new Error(`Booking.com fetch failed: ${pageRes.status}`);
 
       const pageContent = await pageRes.text();
-      if (pageContent.length < 500) throw new Error("Page content too short — possible block");
+      if (pageContent.length < 2000) {
+        throw new Error(`Insufficient content from Booking.com (${pageContent.length} chars)`);
+      }
 
       console.log(`📄 Page fetched (${pageContent.length} chars). Extracting hotels...`);
 
-      // 3. LLM extraction
+      // 4. LLM extraction
       const extractPrompt = `
         Extract every Marriott Bonvoy hotel listed on this page.
 
@@ -148,8 +127,8 @@ export class HotelsAgent {
         }] }
 
         Rules:
-        - Include EVERY hotel on the page — do not skip any.
-        - rating must be a number between 0 and 5.
+        - Include EVERY Marriott/Bonvoy branded hotel — do not skip any.
+        - rating must be a number between 0 and 5 (use 0 if unknown).
         - Use empty string for unknown fields — never omit a key.
         - Output nothing outside the JSON.
       `;
@@ -170,7 +149,7 @@ export class HotelsAgent {
 
       console.log(`🏨 Upserting ${hotels.length} properties for "${location}"...`);
 
-      // 4. Upsert all — no cap
+      // 5. Upsert all — no cap
       for (const h of hotels) {
         const rating = typeof h.rating === 'number' ? h.rating : parseFloat(h.rating) || 0.0;
         const tier = classifyBrand(h.name.toLowerCase());
@@ -195,7 +174,7 @@ export class HotelsAgent {
           h.name,
           location,
           country,
-          marriottUrl,
+          bookingUrl,
           h.description || "",
           h.priceRange || "N/A",
           h.amenities || "",

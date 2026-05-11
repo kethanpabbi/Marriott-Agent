@@ -12,6 +12,17 @@ interface Message {
 }
 
 export default function ChatInterface() {
+  // Generate a unique session ID per browser session so each new chat has its own history
+  const sessionId = useRef<string>(
+    typeof sessionStorage !== 'undefined'
+      ? (sessionStorage.getItem('lumina_session') ?? (() => {
+          const id = `guest-${crypto.randomUUID()}`;
+          sessionStorage.setItem('lumina_session', id);
+          return id;
+        })())
+      : 'guest@example.com'
+  );
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -43,7 +54,7 @@ export default function ChatInterface() {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'guest@example.com', query: text })
+        body: JSON.stringify({ email: sessionId.current, query: text })
       });
       
       const data = await response.json();
