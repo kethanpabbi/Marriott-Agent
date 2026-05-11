@@ -64,16 +64,28 @@ export class HotelsAgent {
     }
 
     console.log(`🚀 Checking local records for ${location}...`);
-    console.log(`📊 Coverage sparse (${existing.length}/${officialCount || '?'}). Attempting autonomous discovery...`);
-
-    const officialUrl = `https://www.marriott.com/en-us/destinations/`; // Generic start
+    // 1. AUTONOMOUS URL ENGINEERING: Find country and construct official directory URL
+    let officialUrl = "";
+    try {
+      console.log(`🌍 Performing Geo-Lookup for ${location}...`);
+      const geoSearch = await scraper.search(`What country is ${location} in for Marriott destinations directory?`);
+      const geoPrompt = `Based on these snippets, what is the country for ${location}? Return ONLY the country name in lowercase (e.g. 'spain', 'ireland', 'united-kingdom'). \n${geoSearch.map((s: any) => s.snippet).join('\n')}`;
+      const country = (await llmService.generateResponse([{ role: 'user', content: geoPrompt }])).toLowerCase().trim().replace(/\s+/g, '-');
+      
+      officialUrl = `https://www.marriott.com/en-us/destinations/${country}/${location.toLowerCase()}.mi`;
+      console.log(`🎯 Constructed Official Directory: ${officialUrl}`);
+    } catch (e) {
+      console.warn("Geo-Lookup failed, falling back to search sweeps.");
+    }
     
     try {
       // 1. OFFICIAL DIRECTORY: Targeted scrape
-      console.log(`🎯 Attempting official directory scrape: ${officialUrl}`);
-      // Note: In production, we'd autonomously find the country first to construct the full .mi URL
-      const dirResult = await scraper.scrapeProperty(officialUrl);
-      let discoveryData = dirResult?.data?.markdown ? `--- OFFICIAL DIRECTORY ---\n${dirResult.data.markdown}` : "";
+      let discoveryData = "";
+      if (officialUrl) {
+        console.log(`🎯 Attempting official directory scrape: ${officialUrl}`);
+        const dirResult = await scraper.scrapeProperty(officialUrl);
+        discoveryData = dirResult?.data?.markdown ? `--- OFFICIAL DIRECTORY ---\n${dirResult.data.markdown}` : "";
+      }
 
       // 2. DYNAMIC BRAND SWEEP
       console.log(`🔍 Generating autonomous discovery sweep for ${location}...`);
