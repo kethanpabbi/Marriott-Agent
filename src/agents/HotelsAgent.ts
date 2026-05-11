@@ -98,19 +98,23 @@ export class HotelsAgent {
         discoveryData = dirResult?.data?.markdown ? `--- OFFICIAL DIRECTORY ---\n${dirResult.data.markdown}` : "";
       }
 
-      // 2. DYNAMIC BRAND SWEEP
+      // 2. DYNAMIC BRAND SWEEP: Comprehensive Tier-by-Tier Hunting
       console.log(`🔍 Generating autonomous discovery sweep for ${location}...`);
       const sweepPrompt = `
-        List 4 targeted Google search queries to find the FULL list of all Marriott Bonvoy hotels in ${location}.
-        ${officialCount > 0 ? `I expect at least ${officialCount} properties.` : "Find as many as possible."}
-        Focus on Autograph, Edition, Ritz-Carlton, Moxy, etc.
-        OUTPUT ONLY A JSON ARRAY OF STRINGS: ["query1", "query2", ...]
+        List 8 targeted Google search queries to find the FULL Marriott Bonvoy portfolio in ${location}.
+        You MUST include a separate query for EACH of these 4 tiers:
+        1. Luxury (Edition, Ritz-Carlton, St. Regis, W Hotels)
+        2. Premium (Autograph, Westin, Sheraton, Marriott, Renaissance)
+        3. Select (AC, Moxy, Aloft, Courtyard, Fairfield, Four Points)
+        4. Longer Stays (Element, Residence Inn, Sonder, TownePlace)
+        
+        OUTPUT ONLY A JSON ARRAY OF STRINGS: ["query1", "query2", ..., "query8"]
       `;
       
       const sweepResponse = await llmService.generateResponse([{ role: 'user', content: sweepPrompt }]);
       const searchQueries = JSON.parse(sweepResponse.match(/\[[\s\S]*\]/)?.[0] || sweepResponse);
       
-      for (const query of searchQueries.slice(0, 4)) {
+      for (const query of searchQueries.slice(0, 8)) {
         console.log(`🔍 Autonomous Sweep: ${query}`);
         const results = await scraper.search(query);
         discoveryData += `\n--- SEARCH: ${query} ---\n${results.map((r: any) => `${r.title}: ${r.snippet}`).join('\n')}`;
