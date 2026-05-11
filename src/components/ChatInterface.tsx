@@ -13,15 +13,18 @@ interface Message {
 
 export default function ChatInterface() {
   // Generate a unique session ID per browser session so each new chat has its own history
-  const sessionId = useRef<string>(
-    typeof sessionStorage !== 'undefined'
-      ? (sessionStorage.getItem('lumina_session') ?? (() => {
-          const id = `guest-${crypto.randomUUID()}`;
-          sessionStorage.setItem('lumina_session', id);
-          return id;
-        })())
-      : 'guest@example.com'
-  );
+  const sessionId = useRef<string>('guest@example.com');
+
+  useEffect(() => {
+    const existing = sessionStorage.getItem('lumina_session');
+    if (existing) {
+      sessionId.current = existing;
+    } else {
+      const id = `guest-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      sessionStorage.setItem('lumina_session', id);
+      sessionId.current = id;
+    }
+  }, []);
 
   const [messages, setMessages] = useState<Message[]>([
     {
