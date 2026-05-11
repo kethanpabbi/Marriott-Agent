@@ -1,68 +1,53 @@
 import { UserAgent } from './UserAgent';
 import { HotelsAgent } from './HotelsAgent';
 import { LLMService } from '@/lib/llm';
-import { ScraperService } from '@/tools/ScraperService';
 
 const userAgent = new UserAgent();
 const hotelsAgent = new HotelsAgent();
 const llmService = new LLMService();
-const scraperService = new ScraperService();
 
 export class WorkflowManager {
-  /**
-   * Main entry point for processing a user message.
-   */
   async processQuery(email: string, query: string) {
-    // 1. Security Check
+    // 1. Security check
     const securityCheck = await userAgent.checkSecurity(email, query);
     if (!securityCheck.safe) {
-      return {
-        response: securityCheck.reason,
-        suggestions: [],
-      };
+      return { response: securityCheck.reason, suggestions: [] };
     }
 
-    // 2. AGENTIC REASONING & LEARNING STEP (Now includes Scope Detection)
-    const history = await userAgent.getChatHistory(email);
+    const [history, user] = await Promise.all([
+      userAgent.getChatHistory(email),
+      userAgent.getOrCreateUser(email),
+    ]);
 
-    // 3. User Context Retrieval
-    const user = await userAgent.getOrCreateUser(email);
-
-    // 4. DYNAMIC CONTEXT EXTRACTION
-    let lastOfferedCity = "none";
-    if (history.length > 0) {
-      const lastAssistantMsg = [...history].reverse().find(m => m.role === 'assistant');
-      if (lastAssistantMsg) {
-        lastOfferedCity = "See History Turn -1"; 
-      }
-    }
-
-    // 5. AGENTIC REASONING & LEARNING STEP
+    // 2. Reasoning step — extracts location, intent, and query type
     const reasoningPrompt = `
-        Analyze the user's latest query and the conversation history.
-        
-        LAST_OFFERED_CITY: "${lastOfferedCity}"
-        
-        TASK:
-        1. "inScope": true/false.
-        2. "activeLocation": Identify the city.
-        3. "isFollowUp": true/false.
-        4. "needsSync": true if location data is missing OR if current data is incomplete.
-        5. "userProfileUpdate": Extract new preferences.
-        6. "reasoning": Explain your logic.
-        
-        OUTPUT ONLY JSON:
-        { 
-          "inScope": boolean,
-          "activeLocation": "string", 
-          "isFollowUp": boolean, 
-          "needsSync": boolean, 
-          "userProfileUpdate": { "likes": string[], "dislikes": string[] },
-          "reasoning": "string" 
-        }
+      Analyze the user's query and conversation history.
+
+      OUTPUT ONLY this JSON (no other text):
+      {
+        "inScope": boolean,
+        "activeLocation": "city name in lowercase, or 'none'",
+        "needsSync": boolean,
+        "isSpecificHotelQuery": boolean,
+        "specificHotelName": "hotel name if asking about one specific property, else null",
+        "isBudgetQuery": boolean,
+        "userProfileUpdate": { "likes": string[], "dislikes": string[] },
+        "reasoning": "string"
+      }
+
+      Rules:
+      - "needsSync" true only if the location is new or changed (not a follow-up on the same city).
+      - "isSpecificHotelQuery" true if the user names a specific hotel.
+      - "isBudgetQuery" true if the user asks for cheaper/budget/affordable options.
+
+      History: ${JSON.stringify(history.slice(-5))}
+      Query: ${query}
     `;
 
-    const reasoningResponse = await llmService.generateResponse([{ role: 'user', content: reasoningPrompt + `\nHistory: ${JSON.stringify(history.slice(-5))}\nQuery: ${query}` }]);
+    const reasoningResponse = await llmService.generateResponse([
+      { role: 'user', content: reasoningPrompt },
+    ]);
+
     let plan: any;
     try {
       const jsonStr = reasoningResponse.match(/\{[\s\S]*\}/)?.[0] || reasoningResponse;
@@ -74,14 +59,18 @@ export class WorkflowManager {
           suggestions: ["Show me Marriotts in London", "What are the best Marriotts for families?"],
         };
       }
-    } catch (e) {
-      plan = { activeLocation: "none", isFollowUp: false, needsSync: false, userProfileUpdate: { likes: [], dislikes: [] }, reasoning: "Fallback" };
+    } catch {
+      plan = {
+        activeLocation: "none", needsSync: false,
+        isSpecificHotelQuery: false, specificHotelName: null, isBudgetQuery: false,
+        userProfileUpdate: { likes: [], dislikes: [] }, reasoning: "Fallback",
+      };
     }
 
     console.log(`🧠 Reasoning: ${plan.reasoning}`);
 
-    // 5. LEARNING & ADAPTATION
-    if (plan.userProfileUpdate && (plan.userProfileUpdate.likes.length > 0 || plan.userProfileUpdate.dislikes.length > 0)) {
+    // 3. Learn from preferences
+    if (plan.userProfileUpdate?.likes?.length > 0 || plan.userProfileUpdate?.dislikes?.length > 0) {
       const newLikes = Array.from(new Set([...user.likes, ...plan.userProfileUpdate.likes]));
       const newDislikes = Array.from(new Set([...user.dislikes, ...plan.userProfileUpdate.dislikes]));
       await userAgent.updatePreferences(email, newLikes, newDislikes);
@@ -89,98 +78,105 @@ export class WorkflowManager {
       user.dislikes = newDislikes;
     }
 
-    // 6. AUTONOMOUS DISCOVERY
-    const locations = plan.activeLocation && plan.activeLocation !== "none" 
-      ? plan.activeLocation.split(',').map((l: string) => l.trim().toLowerCase()) 
-      : [];
-    
-    if (locations.length > 0) {
-      for (const loc of locations) {
-        await hotelsAgent.syncLocation(loc, scraperService, llmService);
-      }
+    const location = plan.activeLocation && plan.activeLocation !== "none" ? plan.activeLocation.trim().toLowerCase() : null;
+
+    // 4. Sync from official Marriott page if needed (staleness check is inside syncLocation)
+    if (location && plan.needsSync) {
+      await hotelsAgent.syncLocation(location, llmService);
     }
 
-    // 7. Data Retrieval
+    // 5. Retrieve hotels
     let hotels: any[] = [];
-    if (locations.length > 0) {
-      for (const loc of locations) {
-        const locHotels = await hotelsAgent.searchHotels(loc);
-        hotels = [...hotels, ...locHotels];
-      }
+    if (location) {
+      hotels = await hotelsAgent.searchHotels(location, {
+        specificHotelName: plan.isSpecificHotelQuery ? plan.specificHotelName : undefined,
+      });
     }
 
-    const filteredHotels = hotels; 
+    // 6. Apply display limit:
+    //    - Specific hotel query → show whatever matches (could be 1)
+    //    - Budget query → top 5 by rating from the fetched pool (already sorted desc)
+    //    - Default → top 5 by rating
+    const displayHotels = plan.isSpecificHotelQuery ? hotels : hotels.slice(0, 5);
 
-    // 5. Generate Response & Suggestions using LLM
-    const { response, suggestions } = await this.generateAIResponse(filteredHotels, query, user, history);
+    // 7. Generate response
+    const { response, suggestions } = await this.generateAIResponse(displayHotels, query, user, history, plan.isBudgetQuery);
 
-    // 6. Log Interaction
-    await userAgent.logInteraction(email, 'user', query);
-    await userAgent.logInteraction(email, 'assistant', response);
+    await Promise.all([
+      userAgent.logInteraction(email, 'user', query),
+      userAgent.logInteraction(email, 'assistant', response),
+    ]);
 
-    return {
-      response,
-      suggestions: suggestions || ["Show me Marriotts in London"],
-    };
+    return { response, suggestions: suggestions || ["Show me Marriotts in London"] };
   }
 
-  private async generateAIResponse(hotels: any[], query: string, user: any, history: any[]): Promise<{ response: string, suggestions: string[] }> {
+  private async generateAIResponse(
+    hotels: any[],
+    query: string,
+    user: any,
+    history: any[],
+    isBudgetQuery: boolean,
+  ): Promise<{ response: string; suggestions: string[] }> {
     const guestProfile = `
       GUEST PREFERENCES:
       - Likes: ${user.likes.join(', ') || 'None yet'}
       - Dislikes: ${user.dislikes.join(', ') || 'None yet'}
     `;
 
+    const budgetInstruction = isBudgetQuery
+      ? "The guest is looking for more affordable options. From the hotels below, highlight those with the lowest priceRange while still maintaining quality. Rank by value for money."
+      : "Present the top 5 hotels shown below, ordered by rating (highest first).";
+
     const messages = [
-      { 
-        role: 'system', 
+      {
+        role: 'system',
         content: `You are Marriott Lumina, a premium AI concierge for Marriott International.
         Only discuss properties that are part of the Marriott Bonvoy portfolio.
-        
-        ${guestProfile}
-        
-        ANTI-HALLUCINATION RULE:
-        - If the "GROUND TRUTH CONTEXT" below is EMPTY, do NOT mention any specific hotels.
-        - Instead, inform the guest that you are currently synchronizing the local property directory for that location and ask them to try again in a few seconds.
-        - NEVER make up hotel names if they aren't in the context.
-        
-        ADAPTATION RULES:
-        1. SOURCE-LOCKED BRANDING: You MUST use the EXACT "Class" provided in the context for every hotel.
-        2. GROUPING MANDATE: Group all hotels into these EXACT headers in order:
-           ### Luxury
-           ### Distinctive Luxury
-           ### Premium
-           ### Select
-           ### Longer Stays
-           ### Collections
-        3. BRAND ACCURACY: You MUST place hotels in the correct tier based on their brand. For example, W Hotels must be under ### Distinctive Luxury, while Moxy must be under ### Select and Autograph Collection under ### Collections.
-        4. MANDATORY FOLLOW-UP: Every hotel list response MUST end with a question about budget or length of stay.
-        
-        OUTPUT FORMAT:
-        [Your helpful, luxury-toned response in Markdown]
-        - Use the format: **Hotel Name** for every property listing.
-        
-        CRITICAL: The tag "SUGGESTIONS:" must ONLY appear at the very end.
-        After "SUGGESTIONS:", provide exactly 3 short follow-up messages the GUEST would naturally say next — NOT questions you'd ask, but replies a guest would give. For example, if you asked about budget, suggest budget responses like "Under $300/night" or "Looking for a long weekend". If you asked about length of stay, suggest "2 nights", "A week", "Just one night". Keep each suggestion under 8 words.
 
-        GROUND TRUTH CONTEXT (USE THESE CLASSES ONLY):
+        ${guestProfile}
+
+        ANTI-HALLUCINATION RULE:
+        - If "GROUND TRUTH CONTEXT" is EMPTY, do NOT mention specific hotels. Tell the guest the directory is syncing and to try again shortly.
+        - NEVER invent hotel names not present in the context.
+
+        DISPLAY RULES:
+        - ${budgetInstruction}
+        - Group hotels under the correct tier headers (only include headers that have hotels):
+          ### Luxury
+          ### Distinctive Luxury
+          ### Premium
+          ### Select
+          ### Longer Stays
+          ### Collections
+        - Use **Hotel Name** format for every property.
+        - Include priceRange and rating (⭐) for each hotel.
+        - If amenities/restaurants/activities are available, mention 1-2 highlights per hotel.
+        - End every hotel list response with a question about budget or length of stay.
+
+        CRITICAL: "SUGGESTIONS:" must appear ONLY at the very end.
+        After "SUGGESTIONS:", provide exactly 3 short replies the GUEST would naturally say next (not questions you ask — guest responses). Keep each under 8 words.
+
+        GROUND TRUTH CONTEXT:
         ${hotels.map(h => `
           Name: ${h.name}
-          Class: ${h.class || "Premium"}
+          Tier: ${h.tier || "Premium"}
           Rating: ${h.rating}
+          PriceRange: ${h.priceRange}
           Description: ${h.description}
-        `).join('\n')}`
+          Amenities: ${h.amenities}
+          Restaurants: ${h.restaurants}
+          Activities: ${h.activities}
+        `).join('\n')}`,
       },
       ...history.slice(-5).map(m => ({ role: m.role, content: m.content })),
-      { role: 'user', content: query }
+      { role: 'user', content: query },
     ];
 
     const rawResponse = await llmService.generateResponse(messages as any);
-    
-    const suggestionsTag = /SUGGESTIONS:?/i;
-    const parts = rawResponse.split(suggestionsTag);
+
+    const parts = rawResponse.split(/SUGGESTIONS:?/i);
     const responseText = parts[0].trim();
-    
+
     let suggestions: string[] = [];
     if (parts[1]) {
       suggestions = parts[1]
@@ -191,7 +187,6 @@ export class WorkflowManager {
     }
 
     if (suggestions.length < 2) {
-      // Detect the last question in the response and generate contextual reply suggestions
       const lastQuestion = responseText.match(/[^.!?\n]+\?[^?]*$/)?.[0]?.trim() || "";
       const lq = lastQuestion.toLowerCase();
 
@@ -206,7 +201,7 @@ export class WorkflowManager {
         suggestions = [
           `What are the dining options at the ${hotels[0].name}?`,
           `Show me Luxury hotels in ${city}`,
-          `Any Marriotts with a rooftop in ${city}?`
+          `Any Marriotts with a rooftop in ${city}?`,
         ];
       } else {
         suggestions = ["Show me Marriotts in London", "Best family-friendly Marriotts?", "Find a beach resort"];
@@ -215,5 +210,4 @@ export class WorkflowManager {
 
     return { response: responseText, suggestions: suggestions.slice(0, 3) };
   }
-
 }

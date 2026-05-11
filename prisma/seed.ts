@@ -12,7 +12,7 @@ async function main() {
     {
       name: "The St. Regis Maldives Vommuli Resort",
       location: "Dhaalu Atoll, Maldives",
-      region: "Maldives",
+      country:"Maldives",
       priceRange: "$1,500 - $5,000",
       description: "Luxury overwater villas with private pools and world-class spa.",
       amenities: "Pool, Spa, Private Beach, Butler Service",
@@ -23,7 +23,7 @@ async function main() {
     {
       name: "JW Marriott Venice Resort & Spa",
       location: "Isola delle Rose, Venice",
-      region: "Europe",
+      country:"Europe",
       priceRange: "$400 - $1,200",
       description: "Private island resort with spectacular views of the Venice lagoon.",
       amenities: "Rooftop Pool, Michelin-star Dining, Garden",
@@ -34,7 +34,7 @@ async function main() {
     {
       name: "The Ritz-Carlton, Kyoto",
       location: "Kamigyo-ku, Kyoto",
-      region: "Asia",
+      country:"Asia",
       priceRange: "$800 - $2,500",
       description: "Elegant riverside hotel blending traditional Japanese aesthetics with modern luxury.",
       amenities: "Indoor Pool, Tea House, Cultural Activities",
@@ -45,7 +45,7 @@ async function main() {
     {
       name: "Paris Marriott Champs-Elysees Hotel",
       location: "70 Avenue des Champs-Elysees, Paris",
-      region: "Europe",
+      country:"Europe",
       priceRange: "$500 - $1,500",
       description: "Five-star luxury on the world's most famous avenue.",
       amenities: "Fitness Center, Sauna, Terrace, Restaurant",
@@ -56,7 +56,7 @@ async function main() {
     {
       name: "London Marriott Hotel County Hall",
       location: "Westminster Bridge Rd, London",
-      region: "Europe",
+      country:"Europe",
       priceRange: "$450 - $1,300",
       description: "Historic hotel with views of Big Ben and the London Eye.",
       amenities: "Executive Lounge, Indoor Pool, Steakhouse",
@@ -67,7 +67,7 @@ async function main() {
     {
       name: "Wailea Beach Resort - Marriott, Maui",
       location: "Wailea, Maui, Hawaii",
-      region: "Hawaii",
+      country:"Hawaii",
       priceRange: "$600 - $2,000",
       description: "Stunning oceanfront resort in the heart of Wailea.",
       amenities: "Adventure Pool, Golf, Oceanview Dining",
