@@ -27,7 +27,6 @@ export class WorkflowManager {
       {
         "inScope": boolean,
         "activeLocation": "city name in lowercase, or 'none'",
-        "needsSync": boolean,
         "isSpecificHotelQuery": boolean,
         "specificHotelName": "hotel name if asking about one specific property, else null",
         "isBudgetQuery": boolean,
@@ -36,7 +35,6 @@ export class WorkflowManager {
       }
 
       Rules:
-      - "needsSync" true only if the location is new or changed (not a follow-up on the same city).
       - "isSpecificHotelQuery" true if the user names a specific hotel.
       - "isBudgetQuery" true if the user asks for cheaper/budget/affordable options.
 
@@ -61,7 +59,7 @@ export class WorkflowManager {
       }
     } catch {
       plan = {
-        activeLocation: "none", needsSync: false,
+        activeLocation: "none",
         isSpecificHotelQuery: false, specificHotelName: null, isBudgetQuery: false,
         userProfileUpdate: { likes: [], dislikes: [] }, reasoning: "Fallback",
       };
@@ -80,8 +78,8 @@ export class WorkflowManager {
 
     const location = plan.activeLocation && plan.activeLocation !== "none" ? plan.activeLocation.trim().toLowerCase() : null;
 
-    // 4. Sync from official Marriott page if needed (staleness check is inside syncLocation)
-    if (location && plan.needsSync) {
+    // 4. Sync — always attempt; syncLocation skips instantly if data is < 7 days old
+    if (location) {
       await hotelsAgent.syncLocation(location, llmService);
     }
 

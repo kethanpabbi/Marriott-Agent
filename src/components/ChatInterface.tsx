@@ -12,19 +12,10 @@ interface Message {
 }
 
 export default function ChatInterface() {
-  // Generate a unique session ID per browser session so each new chat has its own history
-  const sessionId = useRef<string>('guest@example.com');
-
-  useEffect(() => {
-    const existing = sessionStorage.getItem('lumina_session');
-    if (existing) {
-      sessionId.current = existing;
-    } else {
-      const id = `guest-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-      sessionStorage.setItem('lumina_session', id);
-      sessionId.current = id;
-    }
-  }, []);
+  // Fresh session ID every page load — each reload starts a clean conversation
+  const sessionId = useRef<string>(
+    `guest-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+  );
 
   const [messages, setMessages] = useState<Message[]>([
     {
