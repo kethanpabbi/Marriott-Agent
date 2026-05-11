@@ -52,7 +52,7 @@ export class HotelsAgent {
   async syncLocation(location: string, llmService: LLMService) {
     // Staleness check
     const newest = await prisma.hotel.findFirst({
-      where: { location: { contains: location } },
+      where: { location: { contains: location }, description: { not: '' } },
       orderBy: { lastUpdated: 'desc' },
     });
     if (newest) {
