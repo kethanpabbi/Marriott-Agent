@@ -34,6 +34,7 @@ model Hotel {
   activities    String   // Comma-separated
   status        String   @default("Open") // Open, Renovating, Closed
   rating        Float    @default(0.0)
+  class         String?  // Luxury, Premium, Select, Longer Stays
   lastUpdated   DateTime @updatedAt
   nearbyAttractions Attraction[]
 }

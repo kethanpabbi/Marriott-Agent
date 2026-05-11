@@ -258,6 +258,19 @@ export class HotelsAgent {
             }
           }
 
+          // 4. AUTONOMOUS CATEGORIZATION: Map brand to Marriott Umbrella Tier
+          const nameLower = h.name.toLowerCase();
+          let brandClass = "Premium"; // Default
+          
+          const luxuryBrands = ["edition", "jw marriott", "ritz-carlton", "st. regis", "luxury collection", "w hotels", "w barcelona"];
+          const selectBrands = ["ac hotels", "aloft", "city express", "courtyard", "fairfield", "four points", "moxy", "protea", "springhill"];
+          const stayBrands = ["element", "homes & villas", "residence inn", "sonder", "towneplace", "apartments by marriott"];
+          
+          if (luxuryBrands.some(b => nameLower.includes(b))) brandClass = "Luxury";
+          else if (stayBrands.some(b => nameLower.includes(b))) brandClass = "Longer Stays";
+          else if (selectBrands.some(b => nameLower.includes(b))) brandClass = "Select";
+          else brandClass = "Premium"; // Autograph, Marriott, Sheraton, Renaissance, Westin, etc.
+
           // Final safety check for Prisma
           const validatedRating = isNaN(actualRating) ? 0.0 : actualRating;
 
@@ -271,7 +284,8 @@ export class HotelsAgent {
               restaurants: "Marriott Signature Dining",
               activities: `Experience ${location}`,
               region: "Global Discovery",
-              rating: validatedRating
+              rating: validatedRating,
+              class: brandClass
             },
             create: {
               name: h.name,
@@ -282,7 +296,8 @@ export class HotelsAgent {
               restaurants: "Marriott Signature Dining",
               activities: `Experience ${location}`,
               region: "Global Discovery",
-              rating: validatedRating
+              rating: validatedRating,
+              class: brandClass
             }
           });
         }
