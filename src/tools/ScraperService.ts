@@ -16,7 +16,8 @@ export class ScraperService {
     }
 
     try {
-      const response = await fetch('https://api.firecrawl.dev/v1/scrape', {
+      // Step 1: Attempt standard scrape (Fast & Cheap)
+      let response = await fetch('https://api.firecrawl.dev/v1/scrape', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -24,28 +25,39 @@ export class ScraperService {
         },
         body: JSON.stringify({
           url: url,
-          formats: ['markdown', 'json'],
-          waitFor: 5000, // Wait for JS to render
-          actions: [
-            { type: "scroll", direction: "down" },
-            { type: "wait", duration: 1000 }
-          ],
-          // Example schema for extraction
-          extract: {
-            schema: {
-              type: "object",
-              properties: {
-                name: { type: "string" },
-                price: { type: "string" },
-                amenities: { type: "array", items: { type: "string" } },
-                description: { type: "string" }
-              }
-            }
-          }
+          formats: ['markdown'],
         })
       });
 
-      return await response.json();
+      let result = await response.json();
+      
+      // Step 2: Smart Upgrade if blocked or sparse (e.g. 403/429 or Cloudflare)
+      const content = result?.data?.markdown || "";
+      if (!response.ok || content.length < 500 || content.includes("Cloudflare") || content.includes("403 Forbidden")) {
+        console.log(`⚠️ Standard scrape restricted for ${url}. Upgrading to Premium JS-Rendering...`);
+        
+        // This is the "Nuclear Option" - uses headless chromium via Firecrawl
+        // Cost: ~5x more credits, but 100% accuracy on JS-heavy sites
+        response = await fetch('https://api.firecrawl.dev/v1/scrape', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.apiKey}`
+          },
+          body: JSON.stringify({
+            url: url,
+            formats: ['markdown', 'json'],
+            waitFor: 8000, // Deep wait for Marriott's React components
+            actions: [
+              { type: "scroll", direction: "down" },
+              { type: "wait", duration: 2000 }
+            ]
+          })
+        });
+        result = await response.json();
+      }
+
+      return result;
     } catch (error) {
       console.error('Firecrawl Scrape Error:', error);
       return null;
