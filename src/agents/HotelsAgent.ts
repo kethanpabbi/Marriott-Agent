@@ -193,20 +193,21 @@ export class HotelsAgent {
           // 6-Category Marriott Brand Classification
           const nameLower = h.name.toLowerCase();
           let brandClass = "Premium";
-          
-          const luxuryBrands = ["jw marriott", "ritz-carlton", "st. regis"];
-          const distinctiveLuxuryBrands = ["edition", "luxury collection", "ritz-carlton reserve", "w hotels"];
-          const premiumBrands = ["delta hotels", "gaylord hotels", "le meridien", "marriott hotels", "marriott vacation clubs", "renaissance hotels", "sheraton", "westin"];
-          const selectBrands = ["ac hotels", "aloft", "city express", "courtyard", "fairfield", "four points", "moxy", "protea hotels", "series by marriott", "springhill suites"];
-          const stayBrands = ["apartments by marriott bonvoy", "element", "homes & villas", "marriott executive apartments", "residence inn", "studiores", "towneplace suites"];
-          const collectionBrands = ["autograph collection", "design hotels", "mgm collection", "tribute portfolio", "outdoor collection"];
-          
-          if (luxuryBrands.some(b => nameLower.includes(b))) brandClass = "Luxury";
-          else if (distinctiveLuxuryBrands.some(b => nameLower.includes(b))) brandClass = "Distinctive Luxury";
-          else if (collectionBrands.some(b => nameLower.includes(b))) brandClass = "Collections";
-          else if (stayBrands.some(b => nameLower.includes(b))) brandClass = "Longer Stays";
-          else if (selectBrands.some(b => nameLower.includes(b))) brandClass = "Select";
-          else if (premiumBrands.some(b => nameLower.includes(b))) brandClass = "Premium";
+
+          // Each entry is a keyword fragment — matches anywhere in the hotel name
+          const luxuryKeywords = ["jw marriott", "ritz-carlton", "ritz carlton", "st. regis", "st regis", "saint-regis", "saint regis"];
+          const distinctiveLuxuryKeywords = ["edition", "luxury collection", "w hotels", "w paris", "w new york", "w dubai", "w london", "w barcelona", "w hotel", "the w "];
+          const premiumKeywords = ["delta hotels", "gaylord", "le meridien", "le méridien", "marriott hotel", "marriott resort", "vacation club", "renaissance", "sheraton", "westin"];
+          const selectKeywords = ["ac hotels", "ac hotel", "aloft", "city express", "courtyard", "fairfield", "four points", "moxy", "protea", "springhill"];
+          const stayKeywords = ["apartments by marriott", "element hotel", "element by", "homes & villas", "executive apartments", "residence inn", "towneplace"];
+          const collectionKeywords = ["autograph collection", "design hotels", "mgm collection", "tribute portfolio", "outdoor collection"];
+
+          if (luxuryKeywords.some(b => nameLower.includes(b))) brandClass = "Luxury";
+          else if (distinctiveLuxuryKeywords.some(b => nameLower.includes(b))) brandClass = "Distinctive Luxury";
+          else if (collectionKeywords.some(b => nameLower.includes(b))) brandClass = "Collections";
+          else if (stayKeywords.some(b => nameLower.includes(b))) brandClass = "Longer Stays";
+          else if (selectKeywords.some(b => nameLower.includes(b))) brandClass = "Select";
+          else if (premiumKeywords.some(b => nameLower.includes(b))) brandClass = "Premium";
 
           // Raw SQL Upsert
           await prisma.$executeRawUnsafe(`

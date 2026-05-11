@@ -161,7 +161,8 @@ export class WorkflowManager {
         - Use the format: **Hotel Name** for every property listing.
         
         CRITICAL: The tag "SUGGESTIONS:" must ONLY appear at the very end.
-        
+        After "SUGGESTIONS:", provide exactly 3 short follow-up messages the GUEST would naturally say next — NOT questions you'd ask, but replies a guest would give. For example, if you asked about budget, suggest budget responses like "Under $300/night" or "Looking for a long weekend". If you asked about length of stay, suggest "2 nights", "A week", "Just one night". Keep each suggestion under 8 words.
+
         GROUND TRUTH CONTEXT (USE THESE CLASSES ONLY):
         ${hotels.map(h => `
           Name: ${h.name}
@@ -185,18 +186,31 @@ export class WorkflowManager {
       suggestions = parts[1]
         .split('\n')
         .map(s => s.replace(/^\d+\.\s*/, '').replace(/^[•*-]\s*/, '').trim())
-        .filter(s => s.length > 5 && s.includes('?'))
+        .filter(s => s.length > 3)
         .slice(0, 3);
     }
 
-    if (suggestions.length < 2 && hotels.length > 0) {
-      const city = hotels[0].location;
-      const tier = hotels[0].class || "Marriott";
-      suggestions = [
-        `What are the dining options at the ${hotels[0].name}?`,
-        `How do I earn Marriott Bonvoy points in ${city}?`,
-        `Tell me more about ${tier} hotels in ${city}`
-      ];
+    if (suggestions.length < 2) {
+      // Detect the last question in the response and generate contextual reply suggestions
+      const lastQuestion = responseText.match(/[^.!?\n]+\?[^?]*$/)?.[0]?.trim() || "";
+      const lq = lastQuestion.toLowerCase();
+
+      if (lq.includes("budget") || lq.includes("per night") || lq.includes("price")) {
+        suggestions = ["Under $200/night", "Around $400/night", "Budget is flexible"];
+      } else if (lq.includes("length") || lq.includes("how long") || lq.includes("nights") || lq.includes("stay")) {
+        suggestions = ["Just 2 nights", "A full week", "A long weekend"];
+      } else if (lq.includes("prefer") || lq.includes("looking for") || lq.includes("amenities")) {
+        suggestions = ["Spa and wellness", "Great dining options", "Close to city center"];
+      } else if (hotels.length > 0) {
+        const city = hotels[0].location;
+        suggestions = [
+          `What are the dining options at the ${hotels[0].name}?`,
+          `Show me Luxury hotels in ${city}`,
+          `Any Marriotts with a rooftop in ${city}?`
+        ];
+      } else {
+        suggestions = ["Show me Marriotts in London", "Best family-friendly Marriotts?", "Find a beach resort"];
+      }
     }
 
     return { response: responseText, suggestions: suggestions.slice(0, 3) };
