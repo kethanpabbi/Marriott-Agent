@@ -70,30 +70,21 @@ export class HotelsAgent {
   async syncLocation(location: string, scraper: any, llmService: any) {
     console.log(`🚀 Checking local records for ${location}...`);
     
-    // 0. PURGE INVALID: Ensure we don't have hallucinations or rebranded ghosts
+    // 0. GLOBAL BRAND PURGE: Ensure brand integrity without city-specific hardcoding
+    const globalMarriottBrands = [
+      "Marriott", "Ritz-Carlton", "St. Regis", "JW Marriott", "W Hotels", "Edition", 
+      "Autograph Collection", "Renaissance", "Sheraton", "Westin", "Le Méridien", 
+      "Delta Hotels", "Gaylord", "Courtyard", "Four Points", "SpringHill Suites", 
+      "Protea", "Fairfield", "AC Hotels", "Aloft", "Moxy", "Residence Inn", 
+      "TownePlace Suites", "Element"
+    ];
+
     await prisma.hotel.deleteMany({
       where: {
-        OR: [
-          { name: { contains: "Maldron" } },
-          { name: { contains: "Tara Towers" } },
-          { name: { contains: "Westin Dublin" } }, // Force removal of old name to allow rebranding
+        AND: [
+          { location: { contains: location } },
           { NOT: {
-              OR: [
-                { name: { contains: "Marriott" } },
-                { name: { contains: "Ritz" } },
-                { name: { contains: "JW" } },
-                { name: { contains: "W Hotel" } },
-                { name: { contains: "Autograph" } },
-                { name: { contains: "College Green" } }, // Specifically for Dublin
-                { name: { contains: "Shelbourne" } },
-                { name: { contains: "Sheraton" } },
-                { name: { contains: "Westin" } },
-                { name: { contains: "Aloft" } },
-                { name: { contains: "Moxy" } },
-                { name: { contains: "Renaissance" } },
-                { name: { contains: "Courtyard" } },
-                { name: { contains: "Fairfield" } }
-              ]
+              OR: globalMarriottBrands.map(brand => ({ name: { contains: brand } }))
             }
           }
         ]
@@ -166,18 +157,27 @@ export class HotelsAgent {
         }
       }
       
-      // BRAND SWEEP: Search for specific Marriott collections to ensure coverage
-      console.log(`🔍 Performing brand-specific discovery sweep for ${location}...`);
-      const searchQueries = [
-        `official list of Marriott Bonvoy hotels in ${location} 2026`,
-        `Autograph Collection hotels in ${location} Ireland`,
-        `Moxy and Aloft hotels in ${location} Ireland`,
-        `The Shelbourne and College Green Hotel Marriott Dublin`
-      ];
-
-      for (const query of searchQueries) {
-        const results = await scraper.search(query);
-        discoveryData += `\n--- SEARCH: ${query} ---\n${results.map((r: any) => `${r.title}: ${r.snippet}`).join('\n')}`;
+      // 2. DYNAMIC BRAND SWEEP: Generate targeted searches for the specific city
+      console.log(`🔍 Generating autonomous discovery sweep for ${location}...`);
+      const sweepPrompt = `
+        List 4 targeted Google search queries to find the FULL list of all Marriott Bonvoy hotels in ${location}.
+        Focus on specific collections (Autograph, Moxy, etc.) and rebranded properties for 2026.
+        OUTPUT ONLY A JSON ARRAY OF STRINGS: ["query1", "query2", ...]
+      `;
+      
+      try {
+        const sweepResponse = await llmService.generateResponse([{ role: 'user', content: sweepPrompt }]);
+        const searchQueries = JSON.parse(sweepResponse.match(/\[[\s\S]*\]/)?.[0] || sweepResponse);
+        
+        for (const query of searchQueries.slice(0, 4)) {
+          console.log(`🔍 Autonomous Sweep: ${query}`);
+          const results = await scraper.search(query);
+          discoveryData += `\n--- SEARCH: ${query} ---\n${results.map((r: any) => `${r.title}: ${r.snippet}`).join('\n')}`;
+        }
+      } catch (e) {
+        // Simple fallback if LLM fails
+        const results = await scraper.search(`official list of all Marriott Bonvoy hotels in ${location} 2026`);
+        discoveryData += `\n--- FALLBACK SEARCH ---\n${results.map((r: any) => `${r.title}: ${r.snippet}`).join('\n')}`;
       }
       
     } catch (err) {
