@@ -103,26 +103,38 @@ export class HotelsAgent {
       // 3. KNOWLEDGE SYNTHESIS
       const discoveryPrompt = `
         You are the Marriott Portfolio Specialist. 
-        Your mission is to provide a 100% accurate list of properties in ${location}.
-        ${officialCount > 0 ? `I expect at least ${officialCount} properties. DO NOT STOP UNTIL COMPLETE.` : "Extract all properties."}
+        List EVERY Marriott property in ${location}. 
+        ${officialCount > 0 ? `I expect at least ${officialCount} properties.` : ""}
         
         DATA:
         ${discoveryData.slice(0, 30000)}
 
         OUTPUT ONLY JSON:
-        { "hotels": [{ "name": string, "price": string, "amenities": string[], "description": string, "rating": string | number }] }
+        { "hotels": [{ "name": string, "rating": string | number, "description": string }] }
+        Keep descriptions EXTREMELY brief (1 sentence).
       `;
 
       const discoveryResponse = await llmService.generateResponse([{ role: 'user', content: discoveryPrompt }]);
+      if (!discoveryResponse || discoveryResponse.length < 50) throw new Error("Empty discovery response");
+
       const startIdx = discoveryResponse.indexOf('{');
       const endIdx = discoveryResponse.lastIndexOf('}');
+      if (startIdx === -1 || endIdx === -1) throw new Error("No JSON found");
       
       const jsonStr = discoveryResponse.substring(startIdx, endIdx + 1)
         .replace(/,\s*]/g, ']')
         .replace(/,\s*}/g, '}')
         .trim();
 
-      const discovered = JSON.parse(jsonStr);
+      let discovered;
+      try {
+        discovered = JSON.parse(jsonStr);
+      } catch (err) {
+        console.warn("⚠️ Discovery JSON malformed. Attempting emergency repair...");
+        // Fallback: Use regex to extract hotel objects if the JSON is truncated
+        const matches = [...jsonStr.matchAll(/\{"name":\s*"([^"]+)"[^}]*\}/g)];
+        discovered = { hotels: matches.map(m => JSON.parse(m[0])) };
+      }
 
       if (discovered.hotels && discovered.hotels.length > 0) {
         const hotelsToIngest = discovered.hotels.slice(0, 30);
