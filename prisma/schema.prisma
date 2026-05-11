@@ -24,18 +24,21 @@ model User {
 
 model Hotel {
   id            String   @id @default(cuid())
+  marriottId    String?  @unique // e.g. "LAXMR" — Marriott's property code
   name          String   @unique
+  brand         String?  // e.g. "Marriott Hotels", "Westin", "Sheraton"
   location      String
   country       String
   url           String?
-  description   String
-  priceRange    String
-  amenities     String   // Comma-separated
-  restaurants   String   // Comma-separated
-  activities    String   // Comma-separated
+  description   String   @default("")
+  priceRange    String   @default("")
+  amenities     String   @default("") // Comma-separated
+  restaurants   String   @default("") // Comma-separated
+  activities    String   @default("") // Comma-separated
   status        String   @default("Open") // Open, Renovating, Closed
   rating        Float    @default(0.0)
   tier          String?  // Luxury, Distinctive Luxury, Premium, Select, Longer Stays, Collections
+  enriched      Boolean  @default(false)
   lastUpdated   DateTime @updatedAt
   nearbyAttractions Attraction[]
 }
