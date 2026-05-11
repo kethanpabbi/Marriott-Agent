@@ -29,13 +29,10 @@ export class WorkflowManager {
     const user = await userAgent.getOrCreateUser(email);
 
     // 4. DYNAMIC CONTEXT EXTRACTION
-    // We identify the city mentioned in the VERY LAST turn to prevent "Paris Drift".
     let lastOfferedCity = "none";
     if (history.length > 0) {
       const lastAssistantMsg = [...history].reverse().find(m => m.role === 'assistant');
       if (lastAssistantMsg) {
-        // We pass the content of the last response to the reasoning prompt 
-        // and let the LLM extract the location autonomously.
         lastOfferedCity = "See History Turn -1"; 
       }
     }
@@ -50,7 +47,7 @@ export class WorkflowManager {
         1. "inScope": true/false.
         2. "activeLocation": Identify the city.
         3. "isFollowUp": true/false.
-        4. "needsSync": true if location data is missing OR if the current conversation history suggests we need fresher or more comprehensive data (e.g. if we only show 3 properties but the user expects more).
+        4. "needsSync": true if location data is missing OR if current data is incomplete.
         5. "userProfileUpdate": Extract new preferences.
         6. "reasoning": Explain your logic.
         
@@ -73,8 +70,8 @@ export class WorkflowManager {
 
       if (plan.inScope === false) {
         return {
-          response: "I am here specifically to assist you with Marriott International properties and nearby attractions. How can I help you find your next Marriott stay?",
-          suggestions: ["Show me Marriotts in London", "What are the best Marriotts for families?", "Find a hotel in Dubai"],
+          response: "I am here specifically to assist you with Marriott International properties and nearby attractions.",
+          suggestions: ["Show me Marriotts in London", "What are the best Marriotts for families?"],
         };
       }
     } catch (e) {
@@ -83,25 +80,22 @@ export class WorkflowManager {
 
     console.log(`🧠 Reasoning: ${plan.reasoning}`);
 
-    // 5. LEARNING & ADAPTATION: Update User Profile
+    // 5. LEARNING & ADAPTATION
     if (plan.userProfileUpdate && (plan.userProfileUpdate.likes.length > 0 || plan.userProfileUpdate.dislikes.length > 0)) {
-      console.log(`💾 Learning user preferences: ${JSON.stringify(plan.userProfileUpdate)}`);
       const newLikes = Array.from(new Set([...user.likes, ...plan.userProfileUpdate.likes]));
       const newDislikes = Array.from(new Set([...user.dislikes, ...plan.userProfileUpdate.dislikes]));
       await userAgent.updatePreferences(email, newLikes, newDislikes);
-      // Refresh user context for current turn
       user.likes = newLikes;
       user.dislikes = newDislikes;
     }
 
-    // 6. AUTONOMOUS DISCOVERY: Sync Locations
+    // 6. AUTONOMOUS DISCOVERY
     const locations = plan.activeLocation && plan.activeLocation !== "none" 
       ? plan.activeLocation.split(',').map((l: string) => l.trim().toLowerCase()) 
       : [];
     
     if (locations.length > 0) {
       for (const loc of locations) {
-        // HotelsAgent now internally decides if sync is needed based on objective coverage
         await hotelsAgent.syncLocation(loc, scraperService, llmService);
       }
     }
@@ -115,17 +109,7 @@ export class WorkflowManager {
       }
     }
 
-    // If still no hotels, search by query
-    if (hotels.length === 0) {
-      hotels = await hotelsAgent.searchHotels(query);
-    }
-
-    // Final fallback: all hotels
-    if (hotels.length === 0) {
-      hotels = await hotelsAgent.searchHotels("");
-    }
-
-    const filteredHotels = hotels.slice(0, 10);
+    const filteredHotels = hotels; 
 
     // 5. Generate Response & Suggestions using LLM
     const { response, suggestions } = await this.generateAIResponse(filteredHotels, query, user, history);
@@ -136,7 +120,7 @@ export class WorkflowManager {
 
     return {
       response,
-      suggestions: suggestions || ["Show me Marriotts in London", "What are the best Marriotts for families?", "Tell me about Marriott activities in Hawaii"],
+      suggestions: suggestions || ["Show me Marriotts in London"],
     };
   }
 
@@ -147,25 +131,6 @@ export class WorkflowManager {
       - Dislikes: ${user.dislikes.join(', ') || 'None yet'}
     `;
 
-    if (hotels.length === 0) {
-      return { 
-        response: "I couldn't find any Marriott properties matching that specific request in our global directory yet. However, based on your preferences, I can help you find alternatives in cities I've already explored. Where would you like to look?",
-        suggestions: ["Show me Marriotts in London", "Find hotels in Paris"]
-      };
-    }
-
-    const hotelContext = hotels.slice(0, 10).map(h => `
-      ID: ${h.id}
-      Name: ${h.name}
-      Rating: ${h.rating} / 5.0
-      Location: ${h.location}
-      Price: ${h.priceRange}
-      Amenities: ${h.amenities}
-      Restaurants: ${h.restaurants}
-      Activities: ${h.activities}
-      Description: ${h.description}
-    `).join('\n---\n');
-
     const messages = [
       { 
         role: 'system', 
@@ -175,13 +140,13 @@ export class WorkflowManager {
         ${guestProfile}
         
         ADAPTATION RULES:
-        1. MARRIOTT UMBRELLA TIERS: When listing hotels, YOU MUST group them into these 4 tiers in order:
+        1. MARRIOTT UMBRELLA TIERS: Use the EXACT "Class" provided in the context for every hotel. DO NOT OVERRIDE IT. Group them into these 4 tiers in order:
            - **Luxury**: (Edition, JW Marriott, Ritz-Carlton, St. Regis, Luxury Collection, W Hotels)
            - **Premium**: (Autograph Collection, Delta, Design Hotels, Gaylord, Le Meridien, Marriott, Renaissance, Sheraton, Tribute, Westin)
            - **Select**: (AC, Aloft, City Express, Courtyard, Fairfield, Four Points, Moxy, Protea, SpringHill)
            - **Longer Stays**: (Element, Homes & Villas, Residence Inn, Sonder, TownePlace)
-        2. MANDATORY FOLLOW-UP: Every hotel list response MUST end with a question asking about the guest's **budget preferences** or **length of stay** to provide a more personalized recommendation.
-        3. CONTEXT SYNTHESIS: Review the last few messages in the history. Ensure your response directly addresses the LATEST question.
+        2. MANDATORY FOLLOW-UP: Every hotel list response MUST end with a question asking about the guest's budget preferences or length of stay.
+        3. CONTEXT SYNTHESIS: Review history Turn -1 to ensure you don't repeat yourself.
         4. NO HALLUCINATION: Only discuss the hotels provided in the "Available Hotels in Context" section.
         5. USER-PERSPECTIVE SUGGESTIONS: Phrase suggestions as if the USER is asking them.
         
@@ -189,20 +154,15 @@ export class WorkflowManager {
         [Your helpful, luxury-toned response in Markdown]
         - Use the format: **Hotel Name (Class)** for every property listing.
         
-        CRITICAL: DO NOT use trailing ** or * at the end of paragraphs.
         CRITICAL: The tag "SUGGESTIONS:" must ONLY appear at the very end.
         
-        Available Hotels in Context (Ground Truth):
+        Available Hotels in Context (Ground Truth - USE THESE CLASSES ONLY):
         ${hotels.map(h => `
           Name: ${h.name}
           Class: ${h.class || "Premium"}
           Rating: ${h.rating}
           Description: ${h.description}
-        `).join('\n')}
-        
-        User Preferences:
-        Likes: ${user.likes.join(', ')}
-        Dislikes: ${user.dislikes.join(', ')}`
+        `).join('\n')}`
       },
       ...history.slice(-5).map(m => ({ role: m.role, content: m.content })),
       { role: 'user', content: query }
@@ -210,7 +170,6 @@ export class WorkflowManager {
 
     const rawResponse = await llmService.generateResponse(messages as any);
     
-    // Parse response and suggestions with robust regex
     const suggestionsTag = /SUGGESTIONS:?/i;
     const parts = rawResponse.split(suggestionsTag);
     const responseText = parts[0].trim();
@@ -224,13 +183,13 @@ export class WorkflowManager {
         .slice(0, 3);
     }
 
-    // FALLBACK: If AI failed to provide 3 suggestions, generate them autonomously
     if (suggestions.length < 2 && hotels.length > 0) {
       const city = hotels[0].location;
+      const tier = hotels[0].class || "Marriott";
       suggestions = [
         `What are the dining options at the ${hotels[0].name}?`,
         `How do I earn Marriott Bonvoy points in ${city}?`,
-        `Show me more ${hotels[0].class} hotels in ${city}`
+        `Tell me more about ${tier} hotels in ${city}`
       ];
     }
 
