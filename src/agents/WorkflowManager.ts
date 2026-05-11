@@ -210,14 +210,31 @@ export class WorkflowManager {
 
     const rawResponse = await llmService.generateResponse(messages as any);
     
-    // Parse response and suggestions
-    const parts = rawResponse.split(/SUGGESTIONS:/i);
+    // Parse response and suggestions with robust regex
+    const suggestionsTag = /SUGGESTIONS:?/i;
+    const parts = rawResponse.split(suggestionsTag);
     const responseText = parts[0].trim();
-    const suggestions = parts[1] 
-      ? parts[1].split('\n').map(s => s.replace(/^\d+\.\s*/, '').replace(/^[•*-]\s*/, '').trim()).filter(s => s.length > 5).slice(0, 3)
-      : [];
+    
+    let suggestions: string[] = [];
+    if (parts[1]) {
+      suggestions = parts[1]
+        .split('\n')
+        .map(s => s.replace(/^\d+\.\s*/, '').replace(/^[•*-]\s*/, '').trim())
+        .filter(s => s.length > 5 && s.includes('?'))
+        .slice(0, 3);
+    }
 
-    return { response: responseText, suggestions };
+    // FALLBACK: If AI failed to provide 3 suggestions, generate them autonomously
+    if (suggestions.length < 2 && hotels.length > 0) {
+      const city = hotels[0].location;
+      suggestions = [
+        `What are the dining options at the ${hotels[0].name}?`,
+        `How do I earn Marriott Bonvoy points in ${city}?`,
+        `Show me more ${hotels[0].class} hotels in ${city}`
+      ];
+    }
+
+    return { response: responseText, suggestions: suggestions.slice(0, 3) };
   }
 
 }

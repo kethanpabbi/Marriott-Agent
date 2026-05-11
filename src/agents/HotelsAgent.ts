@@ -229,11 +229,11 @@ export class HotelsAgent {
       }
 
       if (discovered.hotels && discovered.hotels.length > 0) {
-        // Limit to top 15 to avoid database bloat and processing delays
-        const hotelsToIngest = discovered.hotels.slice(0, 15);
+        // Increase limit to accommodate major cities like Barcelona (21 hotels)
+        const hotelsToIngest = discovered.hotels.slice(0, 30);
         console.log(`🧠 Discovered ${hotelsToIngest.length} verified properties for ${location}.`);
         
-        for (const h of discovered.hotels) {
+        for (const h of hotelsToIngest) {
           let actualRating = 0.0;
           if (typeof h.rating === 'number') actualRating = h.rating;
           else if (typeof h.rating === 'string' && !h.rating.includes('N/A')) actualRating = parseFloat(h.rating);
