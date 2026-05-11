@@ -203,11 +203,35 @@ export class HotelsAgent {
       const endIdx = discoveryResponse.lastIndexOf('}');
       if (startIdx === -1 || endIdx === -1) throw new Error("No JSON found");
 
-      const jsonStr = discoveryResponse.substring(startIdx, endIdx + 1);
-      const discovered = JSON.parse(jsonStr);
+      const jsonStr = discoveryResponse.substring(startIdx, endIdx + 1)
+        .replace(/,\s*]/g, ']') // Fix trailing commas in arrays
+        .replace(/,\s*}/g, '}') // Fix trailing commas in objects
+        .replace(/\\n/g, ' ')   // Fix unescaped newlines
+        .trim();
+
+      let discovered;
+      try {
+        discovered = JSON.parse(jsonStr);
+      } catch (parseErr) {
+        console.warn("⚠️ JSON Parse failed. Attempting deep repair...");
+        // Fallback: Use a more aggressive regex to find the hotels array
+        const hotelMatch = jsonStr.match(/"hotels":\s*\[([\s\S]*)\]/);
+        if (hotelMatch) {
+          try {
+            // Try to wrap it and fix it
+            discovered = JSON.parse(`{"hotels": [${hotelMatch[1].split('},').slice(0, -1).join('},')} }]}`);
+          } catch (e) {
+            throw new Error("Fatal JSON corruption in discovery response.");
+          }
+        } else {
+          throw parseErr;
+        }
+      }
 
       if (discovered.hotels && discovered.hotels.length > 0) {
-        console.log(`🧠 Discovered ${discovered.hotels.length} verified properties for ${location}.`);
+        // Limit to top 15 to avoid database bloat and processing delays
+        const hotelsToIngest = discovered.hotels.slice(0, 15);
+        console.log(`🧠 Discovered ${hotelsToIngest.length} verified properties for ${location}.`);
         
         for (const h of discovered.hotels) {
           let actualRating = 0.0;
