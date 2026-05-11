@@ -70,23 +70,13 @@ export class HotelsAgent {
   async syncLocation(location: string, scraper: any, llmService: any) {
     console.log(`🚀 Checking local records for ${location}...`);
     
-    // 0. GLOBAL BRAND PURGE: Ensure brand integrity without city-specific hardcoding
-    const globalMarriottBrands = [
-      "Marriott", "Ritz-Carlton", "St. Regis", "JW Marriott", "W Hotels", "Edition", 
-      "Autograph Collection", "Renaissance", "Sheraton", "Westin", "Le Méridien", 
-      "Delta Hotels", "Gaylord", "Courtyard", "Four Points", "SpringHill Suites", 
-      "Protea", "Fairfield", "AC Hotels", "Aloft", "Moxy", "Residence Inn", 
-      "TownePlace Suites", "Element"
-    ];
-
+    // 0. AUTONOMOUS CLEANUP: Trust the LLM to identify real brands, but clear known non-Marriott ghosts
+    // We remove the blunt globalMarriottBrands filter as it was too restrictive (killing properties like The Shelbourne)
     await prisma.hotel.deleteMany({
       where: {
         AND: [
           { location: { contains: location } },
-          { NOT: {
-              OR: globalMarriottBrands.map(brand => ({ name: { contains: brand } }))
-            }
-          }
+          { name: { contains: "Maldron" } } // Only remove known competitors explicitly
         ]
       }
     });
@@ -193,11 +183,11 @@ export class HotelsAgent {
       ${discoveryData.slice(0, 25000)}
 
       TASK:
-      1. Extract EVERY unique Marriott property. 
-      2. REBRANDING IS CRITICAL: If you see "The College Green Hotel" or "formerly Westin Dublin", USE "The College Green Hotel".
-      3. BRAND CHECK: Only include Marriott brands (Ritz-Carlton, St. Regis, JW, W, Autograph, Renaissance, Marriott, Sheraton, Westin, Aloft, Moxy, etc.).
-      4. IGNORE COMPETITORS (Maldron, Hilton, etc.).
-      5. DATA SOURCE: Trust the LIVE DATA above more than your internal memory. 
+      1. Extract EVERY SINGLE unique Marriott property mentioned. YOU MUST BE AGGRESSIVELY COMPREHENSIVE. 
+      2. If you see properties like "The Shelbourne", "Moxy Dublin Docklands", or "Aloft", INCLUDE THEM.
+      3. REBRANDING: Ensure "The College Green Hotel" is listed correctly.
+      4. BRAND CHECK: Only include Marriott brands (Ritz-Carlton, St. Regis, JW, W, Autograph, Renaissance, Marriott, Sheraton, Westin, Aloft, Moxy, etc.).
+      5. IGNORE COMPETITORS: Do not include Maldron, Hilton, IHG, Hyatt.
       
       OUTPUT ONLY JSON. NO PREAMBLE.
       { "hotels": [{ "name": string, "price": string, "amenities": string[], "description": string, "rating": string | number }] }
