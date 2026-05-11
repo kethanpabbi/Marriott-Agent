@@ -154,23 +154,31 @@ export class HotelsAgent {
       officialUrl = `https://www.marriott.com/en-us/destinations/${urlData.country}/${urlData.city}.mi`;
     } catch (e) {}
 
-    // 2. RESILIENT DISCOVERY: Scrape + Search
+    // 2. RESILIENT DISCOVERY: Multi-Brand Sweep
     let discoveryData = "";
     try {
       if (officialUrl) {
-        console.log(`🎯 Attempting official scrape: ${officialUrl}`);
+        console.log(`🎯 Attempting official directory scrape: ${officialUrl}`);
         const scrapeResult = await scraper.scrapeProperty(officialUrl);
         const content = scrapeResult?.data?.markdown || "";
         if (content.length > 2000) {
           discoveryData += `\n--- OFFICIAL DIRECTORY ---\n${content}`;
-        } else {
-          console.log("⚠️ Official directory blocked or sparse. Pivoting to search...");
         }
       }
       
-      // ALWAYS augment with search to ensure 2026 accuracy and bypass blocks
-      const searchResults = await scraper.search(`List of all Marriott Bonvoy hotels in ${location} 2026 official names`);
-      discoveryData += `\n--- VERIFIED SEARCH RESULTS ---\n${searchResults.map((r: any) => `${r.title}: ${r.snippet} (${r.url})`).join('\n')}`;
+      // BRAND SWEEP: Search for specific Marriott collections to ensure coverage
+      console.log(`🔍 Performing brand-specific discovery sweep for ${location}...`);
+      const searchQueries = [
+        `official list of Marriott Bonvoy hotels in ${location} 2026`,
+        `Autograph Collection hotels in ${location} Ireland`,
+        `Moxy and Aloft hotels in ${location} Ireland`,
+        `The Shelbourne and College Green Hotel Marriott Dublin`
+      ];
+
+      for (const query of searchQueries) {
+        const results = await scraper.search(query);
+        discoveryData += `\n--- SEARCH: ${query} ---\n${results.map((r: any) => `${r.title}: ${r.snippet}`).join('\n')}`;
+      }
       
     } catch (err) {
       console.warn("Resilient Discovery failed:", err);
