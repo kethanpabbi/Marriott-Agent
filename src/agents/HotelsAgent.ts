@@ -174,20 +174,23 @@ export class HotelsAgent {
       console.warn("Resilient Discovery failed:", err);
     }
 
-    // 2. KNOWLEDGE SYNTHESIS: Extract the FULL portfolio
+    // 2. KNOWLEDGE SYNTHESIS: Extract the FULL portfolio with Directory-Locking
     const discoveryPrompt = `
       You are the Marriott Portfolio Specialist. 
-      Identify ALL real Marriott Bonvoy properties in: ${location}.
+      Your mission is to provide a 100% accurate list of properties in ${location}.
       
-      LIVE DATA (MAY BE FRAGMENTED DUE TO BLOCKS):
-      ${discoveryData.slice(0, 25000)}
+      I have two sources of data:
+      1. OFFICIAL DIRECTORY CONTENT (The Single Source of Truth):
+      ${discoveryData.includes("OFFICIAL DIRECTORY") ? discoveryData.split("--- SEARCH")[0] : "NOT AVAILABLE"}
+      
+      2. SEARCH SNIPPETS (For enrichment only):
+      ${discoveryData.slice(0, 20000)}
 
-      TASK:
-      1. Extract EVERY SINGLE unique Marriott property mentioned. YOU MUST BE AGGRESSIVELY COMPREHENSIVE. 
-      2. If you see properties like "The Shelbourne", "Moxy Dublin Docklands", or "Aloft", INCLUDE THEM.
-      3. REBRANDING: Ensure "The College Green Hotel" is listed correctly.
-      4. BRAND CHECK: Only include Marriott brands (Ritz-Carlton, St. Regis, JW, W, Autograph, Renaissance, Marriott, Sheraton, Westin, Aloft, Moxy, etc.).
-      5. IGNORE COMPETITORS: Do not include Maldron, Hilton, IHG, Hyatt.
+      CRITICAL TASK:
+      1. Identify ONLY the hotels listed in the OFFICIAL DIRECTORY. 
+      2. If a hotel appears in "SEARCH SNIPPETS" but is NOT in the "OFFICIAL DIRECTORY", it is a hallucination or a 'nearby' hotel. DO NOT INCLUDE IT. (e.g. if Sheraton Dublin is not in the directory, it doesn't exist).
+      3. REBRANDING: If the directory says "The College Green Hotel" but search says "Westin Dublin", use the DIRECTORY name "The College Green Hotel".
+      4. IGNORE COMPETITORS: Do not include Maldron, Hilton, etc.
       
       OUTPUT ONLY JSON. NO PREAMBLE.
       { "hotels": [{ "name": string, "price": string, "amenities": string[], "description": string, "rating": string | number }] }
