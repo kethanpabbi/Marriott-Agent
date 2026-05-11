@@ -187,17 +187,18 @@ export class WorkflowManager {
         
         OUTPUT FORMAT:
         [Your helpful, luxury-toned response in Markdown]
+        - Use the format: **Hotel Name (Class)** for every property listing.
         
         CRITICAL: DO NOT use trailing ** or * at the end of paragraphs.
-        CRITICAL: The tag "SUGGESTIONS:" must ONLY appear at the very end of your response, after all your text.
+        CRITICAL: The tag "SUGGESTIONS:" must ONLY appear at the very end.
         
-        SUGGESTIONS:
-        [First user-style question]
-        [Second user-style question]
-        [Third user-style question]
-        
-        Available Hotels in Context:
-        ${hotelContext}
+        Available Hotels in Context (Ground Truth):
+        ${hotels.map(h => `
+          Name: ${h.name}
+          Class: ${h.class || "Premium"}
+          Rating: ${h.rating}
+          Description: ${h.description}
+        `).join('\n')}
         
         User Preferences:
         Likes: ${user.likes.join(', ')}
