@@ -139,19 +139,26 @@ export class WorkflowManager {
         
         ${guestProfile}
         
+        ANTI-HALLUCINATION RULE:
+        - If the "GROUND TRUTH CONTEXT" below is EMPTY, do NOT mention any specific hotels.
+        - Instead, inform the guest that you are currently synchronizing the local property directory for that location and ask them to try again in a few seconds.
+        - NEVER make up hotel names if they aren't in the context.
+        
         ADAPTATION RULES:
         1. SOURCE-LOCKED BRANDING: You MUST use the EXACT "Class" provided in the context for every hotel.
         2. GROUPING MANDATE: Group all hotels into these EXACT headers in order:
            ### Luxury
+           ### Distinctive Luxury
            ### Premium
            ### Select
            ### Longer Stays
-        3. BRAND ACCURACY: If a hotel is labeled as "Select" (like Moxy) in the context, it MUST go under ### Select. If you place a "Select" hotel under "Premium", you have failed.
+           ### Collections
+        3. BRAND ACCURACY: You MUST place hotels in the correct tier based on their brand. For example, W Hotels must be under ### Distinctive Luxury, while Moxy must be under ### Select and Autograph Collection under ### Collections.
         4. MANDATORY FOLLOW-UP: Every hotel list response MUST end with a question about budget or length of stay.
         
         OUTPUT FORMAT:
         [Your helpful, luxury-toned response in Markdown]
-        - Use the format: **Hotel Name (Class)** for every property listing.
+        - Use the format: **Hotel Name** for every property listing.
         
         CRITICAL: The tag "SUGGESTIONS:" must ONLY appear at the very end.
         

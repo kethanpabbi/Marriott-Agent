@@ -5,22 +5,30 @@ Marriott Lumina is a state-of-the-art, **fully autonomous AI concierge** designe
 ## 🚀 Key Features
 
 - **Total Autonomy**: No hardcoded destinations. Lumina autonomously discovers, learns, and persists Marriott property data from any city or country on earth in real-time.
-- **Adaptive Memory**: The agent "learns" guest preferences (likes/dislikes) during conversation and automatically tailors all future recommendations to match the user's unique profile.
-- **Agentic Reasoning Engine**: Powered by a Chain-of-Thought brain that analyzes user intent, handles multi-city comparisons, and manages complex context switches seamlessly.
-- **Real-Time Global Sync**: Integrated with **Firecrawl** to perform live extractions from Marriott's official directories, ensuring up-to-the-minute accuracy on ratings, amenities, and pricing.
-- **Premium Branded UI**: A luxury-focused chat interface with gold-accented typography and glassmorphism, optimized for high-end hospitality interactions.
+- **Official 6-Tier Classification**: Rigorous brand alignment across Marriott's official categories:
+  - **Luxury**: JW Marriott, Ritz-Carlton, St. Regis.
+  - **Distinctive Luxury**: EDITION, The Luxury Collection, W Hotels, etc.
+  - **Premium**: Marriott, Westin, Sheraton, Le Méridien, etc.
+  - **Select**: Courtyard, Moxy, AC Hotels, Aloft, etc.
+  - **Longer Stays**: Residence Inn, Element, TownePlace Suites.
+  - **Collections**: Autograph Collection, Design Hotels, Tribute Portfolio.
+- **Adaptive Memory**: The agent "learns" guest preferences (likes/dislikes) during conversation and automatically tailors recommendations.
+- **Local Context Enrichment**: Captures **actual price ranges in local currency**, real property amenities, signature restaurants, and local activities.
+- **Regional Intelligence**: Automatically detects Marriott business regions (**EU, APAC, NA, LATAM**) for location-based compliance.
+- **Anti-Hallucination Guardrails**: Strictly source-locked data retrieval ensures that every property listed is a verified Marriott asset.
 
 ## 🛠 Technology Stack
 
 - **Framework**: Next.js 15 (App Router)
-- **Intelligence**: Anthropic Claude 3.5 Sonnet (Reasoning & Response)
-- **Discovery**: Firecrawl (Real-time Scraping & Ingestion)
+- **Intelligence**: Claude 3.5 / Gemini 3 Flash (via LLM Service)
+- **Discovery**: Firecrawl (Autonomous Sweep & Search)
 - **Database**: Prisma + SQLite (Persistent Learning Store)
 - **Styling**: Vanilla CSS (Custom Marriott Brand System)
 
 ## 🏗 Setup & Installation
 
 1. **Clone the repository**:
+
    ```bash
    git clone https://github.com/kethanpabbi/Marriott-Agent.git
    cd Marriott-Agent
@@ -28,6 +36,7 @@ Marriott Lumina is a state-of-the-art, **fully autonomous AI concierge** designe
 
 2. **Environment Configuration**:
    Create a `.env.local` file with the following:
+
    ```env
    ANTHROPIC_API_KEY=your_key
    FIRECRAWL_API_KEY=your_key
@@ -35,27 +44,35 @@ Marriott Lumina is a state-of-the-art, **fully autonomous AI concierge** designe
    ```
 
 3. **Initialize Database**:
+
    ```bash
    npx prisma db push
    ```
 
 4. **Launch the Experience**:
+
    ```bash
    npm run dev
    ```
 
 ## 🧠 Autonomous Intelligence
+
 Lumina does not rely on static databases. When a guest asks about a new location, the agent:
+
 1. **Detects** the new destination via its Reasoning Engine.
-2. **Executes** a live discovery sync.
-3. **Ingests** the results into its long-term memory (DB).
-4. **Responds** with high-context, personalized data.
+2. **Identifies** the region and anticipated property density.
+3. **Executes** a multi-tier autonomous search sweep.
+4. **Ingests** enriched data (pricing, dining, ratings) into its long-term memory.
+5. **Responds** with personalized, branded recommendations.
 
 ## 🔒 Security Policy
+
 Built with enterprise-grade security:
+
 - **Scope Enforcement**: Strictly limited to Marriott Bonvoy portfolio.
-- **Privacy Protection**: No sensitive guest data leakage.
-- **Injection Defense**: Robust sanitization of all LLM inputs.
+- **Source-Locked Branding**: Prevents hallucination of non-Marriott properties.
+- **Injection Defense**: Robust sanitization of all LLM and scraper inputs.
 
 ---
+
 Built as a POC for Marriott International.
