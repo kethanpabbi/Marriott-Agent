@@ -240,7 +240,7 @@ export class HotelsAgent {
         Extract hotel details from this Booking.com page for "${hotel.name}".
 
         PAGE CONTENT:
-        ${pageContent.slice(0, 6000)}
+        ${pageContent.slice(0, 20000)}
 
         Return ONLY a valid JSON object:
         {
