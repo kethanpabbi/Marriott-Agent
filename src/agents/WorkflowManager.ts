@@ -211,7 +211,7 @@ export class WorkflowManager {
           ### Longer Stays
           ### Collections
         - Use **Hotel Name** format for every property.
-        - Include priceRange and rating (shown as X/10, e.g. "8.6/10") for each hotel where available. Never show rating as stars.
+        - Include priceRange and rating for each hotel where available. Show rating as ⭐ 8.6 (star icon followed by the score, exactly as Booking.com displays it).
         - If amenities/restaurants/activities are available, mention 1-2 highlights per hotel.
         - End every hotel list response with a question about budget or length of stay.
 
