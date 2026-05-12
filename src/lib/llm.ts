@@ -40,8 +40,9 @@ export class LLMService {
   async generateEnrichmentResponse(messages: ChatMessage[]): Promise<string> {
     try {
       return await this.callOllama(messages, this.ollamaEnrichmentModel);
-    } catch {
-      console.log('⚠️  Ollama unavailable — falling back to Claude for enrichment');
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.warn(`⚠️  Ollama failed (${reason}) — falling back to Claude for enrichment`);
       return this.callClaude(messages, 1024);
     }
   }
@@ -94,10 +95,16 @@ export class LLMService {
     });
 
     if (!response.ok) {
-      throw new Error(`Ollama error ${response.status}`);
+      const body = await response.text().catch(() => '');
+      if (response.status === 404 || body.includes('not found')) {
+        throw new Error(`model "${model}" not found — run: ollama pull ${model}`);
+      }
+      throw new Error(`Ollama HTTP ${response.status}: ${body}`);
     }
 
     const data = await response.json();
-    return data.message?.content ?? '';
+    const content = data.message?.content ?? '';
+    if (!content) throw new Error('Ollama returned empty content');
+    return content;
   }
 }
