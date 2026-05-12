@@ -34,14 +34,15 @@ export class HotelsAgent {
       });
     }
 
+    // No take() cap — return all hotels so pickOnePerTier in WorkflowManager
+    // has a full pool across every tier, not just the top-rated few.
     return prisma.hotel.findMany({
       where: {
         location: { contains: location },
         status: { not: 'Closed' },
         ...countryFilter,
       },
-      orderBy: { rating: 'desc' },
-      take: 10,
+      orderBy: [{ rating: 'desc' }],
       include: { nearbyAttractions: true },
     });
   }
@@ -83,7 +84,7 @@ export class HotelsAgent {
     // 1. Load existing DB hotels for this location
     const dbHotels = await prisma.hotel.findMany({
       where: { location: { contains: location }, status: { not: 'Closed' }, ...countryFilter },
-      select: { id: true, name: true, description: true, lastUpdated: true },
+      select: { id: true, name: true, tier: true, description: true, lastUpdated: true },
     });
 
     if (dbHotels.length === 0) {
@@ -104,9 +105,24 @@ export class HotelsAgent {
       }
     }
 
-    // 3. Enrich up to 10 hotels (matches what the UI displays)
-    const toEnrich = dbHotels.slice(0, 10);
-    console.log(`🔍 Enriching ${toEnrich.length} hotels for "${location}" via Booking.com...`);
+    // 3. Pick hotels to enrich: up to 2 per tier so all tiers get coverage,
+    //    prioritising unenriched hotels first, capped at 12 total.
+    const TIERS = ['Luxury', 'Distinctive Luxury', 'Premium', 'Select', 'Longer Stays', 'Collections'];
+    const unenriched = dbHotels.filter(h => !h.description || h.description.trim() === '');
+    const toEnrichSet = new Set<string>();
+
+    for (const tier of TIERS) {
+      const candidates = unenriched.filter(h => (h.tier || 'Premium') === tier);
+      candidates.slice(0, 2).forEach(h => toEnrichSet.add(h.id));
+    }
+    // Top up with any remaining unenriched hotels until we hit 12
+    for (const h of unenriched) {
+      if (toEnrichSet.size >= 12) break;
+      toEnrichSet.add(h.id);
+    }
+
+    const toEnrich = dbHotels.filter(h => toEnrichSet.has(h.id));
+    console.log(`🔍 Enriching ${toEnrich.length} hotels for "${location}" via Booking.com (covering ${TIERS.filter(t => toEnrich.some(h => (h.tier || 'Premium') === t)).length} tiers)...`);
 
     let updated = 0;
     for (const hotel of toEnrich) {

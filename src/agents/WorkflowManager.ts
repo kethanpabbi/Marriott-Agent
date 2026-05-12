@@ -9,8 +9,10 @@ const llmService = new LLMService();
 const TIER_ORDER = ['Luxury', 'Distinctive Luxury', 'Premium', 'Select', 'Longer Stays', 'Collections'];
 
 /**
- * Pick the highest-rated hotel from each available tier.
- * When isBudgetQuery is true, sort each tier's candidates by price ascending instead.
+ * Pick the best hotel from each available tier.
+ * - Prefers enriched hotels (have a description) over unenriched ones.
+ * - Within enriched: sorts by rating desc (or price asc for budget queries).
+ * - Falls back to unenriched hotels so every tier is always represented.
  */
 function pickOnePerTier(hotels: any[], isBudgetQuery: boolean): any[] {
   const byTier: Record<string, any[]> = {};
@@ -25,18 +27,20 @@ function pickOnePerTier(hotels: any[], isBudgetQuery: boolean): any[] {
     const candidates = byTier[tier];
     if (!candidates?.length) continue;
 
+    const enriched = candidates.filter(h => h.description && h.description.trim() !== '');
+    const pool = enriched.length > 0 ? enriched : candidates; // fall back to unenriched
+
     if (isBudgetQuery) {
-      // Sort by lowest price — extract first number from priceRange string
-      candidates.sort((a, b) => {
+      pool.sort((a, b) => {
         const priceA = parseFloat(a.priceRange?.replace(/[^0-9.]/g, '') || '99999');
         const priceB = parseFloat(b.priceRange?.replace(/[^0-9.]/g, '') || '99999');
         return priceA - priceB;
       });
     } else {
-      candidates.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+      pool.sort((a, b) => (b.rating || 0) - (a.rating || 0));
     }
 
-    result.push(candidates[0]);
+    result.push(pool[0]);
   }
   return result;
 }
