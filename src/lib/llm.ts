@@ -40,11 +40,11 @@ export class LLMService {
    */
   async generateEnrichmentResponse(messages: ChatMessage[]): Promise<string> {
     try {
-      return await this.callOllama(messages, this.ollamaEnrichmentModel, 8192);
+      return await this.callOllama(messages, this.ollamaEnrichmentModel, 4096);
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       console.log(`  🔄 Ollama failed (${reason}), retrying with smaller context...`);
-      return await this.callOllama(messages, this.ollamaEnrichmentModel, 4096);
+      return await this.callOllama(messages, this.ollamaEnrichmentModel, 2048);
     }
   }
 
