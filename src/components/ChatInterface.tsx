@@ -17,6 +17,7 @@ export default function ChatInterface() {
     `guest-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
   );
 
+  const [managedSessionId, setManagedSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -45,15 +46,17 @@ export default function ChatInterface() {
 
     // Real API call
     try {
-      const response = await fetch('/api/chat', {
+      const response = await fetch('/api/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: sessionId.current, query: text })
+        body: JSON.stringify({ email: sessionId.current, query: text, managedSessionId })
       });
       
       const data = await response.json();
       
       if (data.error) throw new Error(data.error);
+
+      if (data.managedSessionId) setManagedSessionId(data.managedSessionId);
 
       const assistantMsg: Message = {
         id: Date.now().toString(),

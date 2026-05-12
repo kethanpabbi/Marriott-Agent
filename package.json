@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.95.2",
     "@prisma/client": "5.22.0",
     "framer-motion": "latest",
     "lucide-react": "latest",

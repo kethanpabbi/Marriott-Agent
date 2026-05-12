@@ -10,6 +10,7 @@ Marriott Lumina is an **AI-powered hotel concierge** for the global Marriott Bon
 - **Ratings as shown on Booking.com**: Guest review scores are extracted and displayed on the native /10 scale (e.g. ⭐ 8.6), exactly as Booking.com shows them. No conversion or guessing — only values explicitly present in the page are used.
 - **Tier Diversity**: Responses always show one hotel from each available Marriott tier — Luxury, Distinctive Luxury, Premium, Select, Longer Stays, and Collections — rather than a list from a single category.
 - **Location Disambiguation**: Understands that "Paris" means France, not Texas. Country is inferred from context and used to filter results.
+- **Persistent Conversation Memory**: The agent remembers the full conversation within a session — follow-up questions like "what museums are nearby?" correctly reference the city discussed earlier.
 - **Adaptive Preferences**: Learns guest likes/dislikes during the conversation and tailors recommendations automatically.
 - **Official 6-Tier Classification**:
   - **Luxury**: JW Marriott, Ritz-Carlton, St. Regis
@@ -24,7 +25,7 @@ Marriott Lumina is an **AI-powered hotel concierge** for the global Marriott Bon
 | Layer | Technology |
 |---|---|
 | Framework | Next.js 15 (App Router) |
-| Conversation AI | Claude Haiku (Anthropic) |
+| Conversation AI | Claude (Anthropic Managed Agents — Console) |
 | Enrichment AI | Ollama `llama3.1:8b` (local, free — no rate limits) |
 | Data Discovery | DuckDuckGo Lite → Booking.com hotel pages → Jina Reader |
 | Database | Prisma ORM + SQLite |
@@ -55,6 +56,15 @@ Create a `.env.local` file:
 ```env
 ANTHROPIC_API_KEY=your_anthropic_api_key
 DATABASE_URL="file:./prisma/dev.db"
+
+# Managed Agents (Claude Console)
+# The agent ID is hard-coded in /api/agent/route.ts — create your own at platform.claude.com.
+# The environment ID is auto-created on first run and logged to console; paste it here to reuse it.
+ANTHROPIC_ENVIRONMENT_ID=
+
+# Required for local development — expose your local server via ngrok and paste the URL here.
+# The agent route uses this to call internal tool endpoints.
+NEXT_PUBLIC_APP_URL=https://your-ngrok-url.ngrok-free.app
 ```
 
 Create a `.env` file (for Prisma CLI tools):
@@ -75,7 +85,17 @@ npx prisma db seed
 
 The seed script populates the 9,872-hotel directory from the Marriott sitemap.
 
-### 5. Launch
+### 5. Expose local server (development only)
+
+The Claude Console agent runs on Anthropic's infrastructure. Tool endpoints must be publicly reachable:
+
+```bash
+ngrok http 3000
+```
+
+Copy the `https://xxxx.ngrok-free.app` URL into `NEXT_PUBLIC_APP_URL` in `.env.local`.
+
+### 6. Launch
 
 ```bash
 # Terminal 1 — Ollama (if not already running)
@@ -87,7 +107,9 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) and start chatting.
 
-### 6. Database Viewer (optional)
+On the first request the app auto-creates a Managed Agents environment and logs the ID to the console. Paste it into `ANTHROPIC_ENVIRONMENT_ID` to reuse it across restarts.
+
+### 7. Database Viewer (optional)
 
 ```bash
 npx prisma studio
@@ -97,15 +119,30 @@ Opens at [http://localhost:5555](http://localhost:5555) — browse hotels, users
 
 ## 🧠 How It Works
 
-When a guest asks about a city:
+When a guest sends a message:
 
-1. **Security check** — query is validated as in-scope for Marriott Bonvoy.
-2. **Reasoning** — Claude extracts the city, country, intent, specific hotel name (if any), and budget preference. Ambiguous city names (e.g. Paris) default to the most internationally prominent location.
-3. **Preference learning** — any expressed likes/dislikes are persisted to the guest profile.
-4. **Background enrichment** — hotels with `enriched=false` are looked up individually on Booking.com via Jina Reader. Ollama (`llama3.1:8b`, `temperature=0`, `num_predict=400`) extracts rating, price, amenities, restaurants, and activities from the real page content — no guessing. The `enriched` flag is set to `true` permanently after success. If enrichment is still in progress, basic results are returned immediately without making the user wait.
-5. **Retrieval** — returns all hotels for the location filtered by country, sorted by rating.
-6. **Tier selection** — picks the best hotel from each available tier for a diverse recommendation.
-7. **Response** — Claude formats a branded reply grouped by tier, with ratings (⭐) and price ranges.
+1. **Session continuity** — the app reuses an existing Claude Console session for the duration of the conversation, giving the agent full memory of prior turns.
+2. **Agentic tool loop** — the agent (Marriott Lumina, hosted on Claude Console) decides which tools to call. It has three client-handled tools:
+   - `get_user_profile` — reads the guest's saved likes/dislikes from the local DB.
+   - `search_hotels` — queries the 9,872-hotel directory, filtered by location/country/budget, with one result per Marriott tier.
+   - `update_preferences` — persists any expressed preferences back to the guest profile.
+3. **Tool execution** — tool calls are delivered as SSE events over the session stream. The Next.js route executes each call directly against the local agents (no extra HTTP roundtrip) and feeds results back.
+4. **Background enrichment** — `search_hotels` fires a background Booking.com scrape for any city that hasn't been enriched yet. Ollama (`llama3.1:8b`, `temperature=0`) extracts rating, price, amenities, restaurants, and activities from the real page content. The `enriched` flag is set permanently after success.
+5. **Response** — the agent formats a branded reply grouped by Marriott tier with ratings (⭐) and price ranges, then the app parses any follow-up suggestion chips from the response.
+
+## Architecture
+
+```
+Browser → POST /api/agent
+            ├── Reuse or create Claude Console session
+            ├── Stream-first SSE event loop
+            │     ├── agent.custom_tool_use  → runTool() → UserAgent / HotelsAgent (direct call)
+            │     ├── user.custom_tool_result → fed back to session
+            │     └── session.status_idle (end_turn) → done
+            └── { response, suggestions, managedSessionId }
+```
+
+The `managedSessionId` is returned to the browser and sent back with every subsequent message, keeping the same Console session alive for the whole conversation.
 
 ## 🔒 Security
 
