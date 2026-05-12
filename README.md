@@ -1,77 +1,87 @@
 # Marriott Lumina AI Concierge 🏨✨
 
-Marriott Lumina is a state-of-the-art, **fully autonomous AI concierge** designed to provide a premium, personalized hotel discovery experience across the global Marriott Bonvoy portfolio.
+Marriott Lumina is an **AI-powered hotel concierge** for the global Marriott Bonvoy portfolio. Ask about any city and get real hotel data — ratings, prices, amenities, and dining — sourced live from Booking.com and cached locally for instant follow-up queries.
 
 ## 🚀 Key Features
 
-- **Total Autonomy**: No hardcoded destinations. Lumina autonomously discovers, learns, and persists Marriott property data from any city or country on earth in real-time.
-- **Official 6-Tier Classification**: Rigorous brand alignment across Marriott's official categories:
-  - **Luxury**: JW Marriott, Ritz-Carlton, St. Regis.
-  - **Distinctive Luxury**: EDITION, The Luxury Collection, W Hotels, etc.
-  - **Premium**: Marriott, Westin, Sheraton, Le Méridien, etc.
-  - **Select**: Courtyard, Moxy, AC Hotels, Aloft, etc.
-  - **Longer Stays**: Residence Inn, Element, TownePlace Suites.
-  - **Collections**: Autograph Collection, Design Hotels, Tribute Portfolio.
-- **Adaptive Memory**: The agent "learns" guest preferences (likes/dislikes) during conversation and automatically tailors recommendations.
-- **Local Context Enrichment**: Captures **actual price ranges in local currency**, real property amenities, signature restaurants, and local activities.
-- **Regional Intelligence**: Automatically detects Marriott business regions (**EU, APAC, NA, LATAM**) for location-based compliance.
-- **Anti-Hallucination Guardrails**: Strictly source-locked data retrieval ensures that every property listed is a verified Marriott asset.
+- **On-Demand Live Sync**: When a guest asks about a city, Lumina automatically fetches real hotel data from Booking.com's Marriott co-branded pages, extracts it with an LLM, and caches it in the local database for 7 days.
+- **9,872-Hotel Directory**: Pre-seeded from the official Marriott sitemap with every active property (name, brand, tier, location, country). Used as the source of truth — no hallucinated hotels.
+- **Official 6-Tier Classification**: Rigorous brand alignment across Marriott's categories:
+  - **Luxury**: JW Marriott, Ritz-Carlton, St. Regis
+  - **Distinctive Luxury**: EDITION, W Hotels, The Luxury Collection
+  - **Premium**: Marriott Hotels, Westin, Sheraton, Le Méridien, Renaissance
+  - **Select**: Courtyard, Moxy, AC Hotels, Aloft, Four Points, Fairfield
+  - **Longer Stays**: Residence Inn, Element, TownePlace Suites
+  - **Collections**: Autograph Collection, Design Hotels, Tribute Portfolio
+- **Adaptive Preferences**: Learns guest likes/dislikes during the conversation and tailors recommendations automatically.
+- **Anti-Hallucination Guardrails**: Every property listed must exist in the DB. If sync hasn't run yet, the agent says so rather than inventing hotels.
+- **Smart Caching**: Data fresher than 7 days is served instantly from SQLite — no redundant fetches.
 
 ## 🛠 Technology Stack
 
-- **Framework**: Next.js 15 (App Router)
-- **Intelligence**: Claude 3.5 / Gemini 3 Flash (via LLM Service)
-- **Discovery**: Firecrawl (Autonomous Sweep & Search)
-- **Database**: Prisma + SQLite (Persistent Learning Store)
-- **Styling**: Vanilla CSS (Custom Marriott Brand System)
+| Layer | Technology |
+|---|---|
+| Framework | Next.js 15 (App Router) |
+| AI | Claude (Anthropic) via LLM Service |
+| Data Discovery | DuckDuckGo Lite → Booking.com Marriott pages → Jina Reader |
+| Database | Prisma ORM + SQLite |
+| Styling | Vanilla CSS (custom Marriott brand system) |
 
 ## 🏗 Setup & Installation
 
-1. **Clone the repository**:
+### 1. Clone the repository
 
-   ```bash
-   git clone https://github.com/kethanpabbi/Marriott-Agent.git
-   cd Marriott-Agent
-   ```
+```bash
+git clone https://github.com/kethanpabbi/Marriott-Agent.git
+cd Marriott-Agent
+```
 
-2. **Environment Configuration**:
-   Create a `.env.local` file with the following:
+### 2. Environment Configuration
 
-   ```env
-   ANTHROPIC_API_KEY=your_key
-   FIRECRAWL_API_KEY=your_key
-   DATABASE_URL="file:./dev.db"
-   ```
+Create a `.env.local` file:
 
-3. **Initialize Database**:
+```env
+ANTHROPIC_API_KEY=your_anthropic_api_key
+DATABASE_URL="file:./prisma/dev.db"
+```
 
-   ```bash
-   npx prisma db push
-   ```
+### 3. Initialize the Database
 
-4. **Launch the Experience**:
+```bash
+npx prisma db push
+npx prisma db seed
+```
 
-   ```bash
-   npm run dev
-   ```
+The seed script populates the 9,872-hotel directory from the Marriott sitemap.
 
-## 🧠 Autonomous Intelligence
+### 4. Launch
 
-Lumina does not rely on static databases. When a guest asks about a new location, the agent:
+```bash
+npm run dev
+```
 
-1. **Detects** the new destination via its Reasoning Engine.
-2. **Identifies** the region and anticipated property density.
-3. **Executes** a multi-tier autonomous search sweep.
-4. **Ingests** enriched data (pricing, dining, ratings) into its long-term memory.
-5. **Responds** with personalized, branded recommendations.
+Open [http://localhost:3000](http://localhost:3000) and start chatting.
 
-## 🔒 Security Policy
+## 🧠 How It Works
 
-Built with enterprise-grade security:
+When a guest asks about a city:
 
-- **Scope Enforcement**: Strictly limited to Marriott Bonvoy portfolio.
-- **Source-Locked Branding**: Prevents hallucination of non-Marriott properties.
-- **Injection Defense**: Robust sanitization of all LLM and scraper inputs.
+1. **Security check** — query is validated as in-scope for Marriott Bonvoy.
+2. **Reasoning** — LLM extracts the city, intent, specific hotel name (if any), and budget preference.
+3. **Preference learning** — any expressed likes/dislikes are persisted to the guest profile.
+4. **Live sync** — if the city has no enriched data (or data is > 7 days old), Lumina:
+   - Searches DuckDuckGo for the Booking.com Marriott city page
+   - Fetches the page via Jina Reader (bot-accessible markdown)
+   - LLM extracts all hotels with ratings, prices, amenities, restaurants, and activities
+   - Upserts results into SQLite
+5. **Retrieval** — returns the top-rated hotels from the DB (or the specific property if named).
+6. **Response** — Lumina formats a branded reply grouped by tier, with real ratings (⭐) and price ranges.
+
+## 🔒 Security
+
+- **Scope enforcement**: Strictly limited to Marriott Bonvoy portfolio — off-topic queries are rejected.
+- **Source-locked data**: Only hotels present in the 9,872-property directory can appear in responses.
+- **Injection defense**: All LLM inputs are sanitized; no external instructions can alter agent behavior.
 
 ---
 
