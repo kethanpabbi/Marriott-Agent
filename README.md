@@ -7,6 +7,7 @@ Marriott Lumina is an **AI-powered hotel concierge** for the global Marriott Bon
 - **9,872-Hotel Directory**: Pre-seeded from the official Marriott sitemap. Every response is grounded in this directory — no hallucinated hotels.
 - **Per-Hotel Booking.com Enrichment**: Each hotel is individually looked up on Booking.com by name (with real check-in dates for accurate pricing), enriched once, and marked `enriched=true` permanently. Already-enriched hotels are never re-processed.
 - **Background Enrichment**: First query for a city returns basic results immediately while Ollama enriches hotels in the background. Subsequent queries get full ratings, prices, amenities, and descriptions.
+- **Ratings as shown on Booking.com**: Guest review scores are extracted and displayed on the native /10 scale (e.g. ⭐ 8.6), exactly as Booking.com shows them. No conversion or guessing — only values explicitly present in the page are used.
 - **Tier Diversity**: Responses always show one hotel from each available Marriott tier — Luxury, Distinctive Luxury, Premium, Select, Longer Stays, and Collections — rather than a list from a single category.
 - **Location Disambiguation**: Understands that "Paris" means France, not Texas. Country is inferred from context and used to filter results.
 - **Adaptive Preferences**: Learns guest likes/dislikes during the conversation and tailors recommendations automatically.
@@ -24,7 +25,7 @@ Marriott Lumina is an **AI-powered hotel concierge** for the global Marriott Bon
 |---|---|
 | Framework | Next.js 15 (App Router) |
 | Conversation AI | Claude Haiku (Anthropic) |
-| Enrichment AI | Ollama (local, free — `llama3.1:8b` or any local model) |
+| Enrichment AI | Ollama `llama3.1:8b` (local, free — no rate limits) |
 | Data Discovery | DuckDuckGo Lite → Booking.com hotel pages → Jina Reader |
 | Database | Prisma ORM + SQLite |
 | Styling | Vanilla CSS (custom Marriott brand system) |
@@ -101,7 +102,7 @@ When a guest asks about a city:
 1. **Security check** — query is validated as in-scope for Marriott Bonvoy.
 2. **Reasoning** — Claude extracts the city, country, intent, specific hotel name (if any), and budget preference. Ambiguous city names (e.g. Paris) default to the most internationally prominent location.
 3. **Preference learning** — any expressed likes/dislikes are persisted to the guest profile.
-4. **Background enrichment** — hotels with `enriched=false` are looked up individually on Booking.com via Jina Reader. Ollama extracts rating, price, amenities, restaurants, and activities. The `enriched` flag is set to `true` permanently after success. If enrichment is in progress, basic results are returned immediately.
+4. **Background enrichment** — hotels with `enriched=false` are looked up individually on Booking.com via Jina Reader. Ollama (`llama3.1:8b`, `temperature=0`, `num_predict=400`) extracts rating, price, amenities, restaurants, and activities from the real page content — no guessing. The `enriched` flag is set to `true` permanently after success. If enrichment is still in progress, basic results are returned immediately without making the user wait.
 5. **Retrieval** — returns all hotels for the location filtered by country, sorted by rating.
 6. **Tier selection** — picks the best hotel from each available tier for a diverse recommendation.
 7. **Response** — Claude formats a branded reply grouped by tier, with ratings (⭐) and price ranges.
