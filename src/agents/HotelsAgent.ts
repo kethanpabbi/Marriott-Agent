@@ -240,7 +240,7 @@ export class HotelsAgent {
         Extract hotel details from this Booking.com page for "${hotel.name}".
 
         PAGE CONTENT:
-        ${pageContent.slice(0, 20000)}
+        ${pageContent.slice(0, 6000)}
 
         Return ONLY a valid JSON object:
         {
@@ -293,7 +293,9 @@ export class HotelsAgent {
       console.log(`  ✅ "${hotel.name}" enriched (★${rating}, ${data.priceRange || 'no price'})`);
       return true;
     } catch (err) {
-      console.log(`  ❌ Failed to enrich "${hotel.name}":`, err);
+      if (err instanceof RateLimitError) throw err; // let syncLocation stop the loop
+      const reason = err instanceof Error ? err.message : String(err);
+      console.log(`  ⚠️  Skipping "${hotel.name}": ${reason}`);
       return false;
     }
   }

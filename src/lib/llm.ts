@@ -37,14 +37,13 @@ export class LLMService {
    * Falls back to Claude only if Ollama is unreachable.
    * Throws RateLimitError if Claude is used and rate-limited, so callers can stop.
    */
+  /**
+   * Enrichment extraction — Ollama only. Never falls back to Claude.
+   * If Ollama fails, the error propagates so the caller can skip that hotel
+   * and continue with the next one.
+   */
   async generateEnrichmentResponse(messages: ChatMessage[]): Promise<string> {
-    try {
-      return await this.callOllama(messages, this.ollamaEnrichmentModel);
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      console.warn(`⚠️  Ollama failed (${reason}) — falling back to Claude for enrichment`);
-      return this.callClaude(messages, 1024);
-    }
+    return this.callOllama(messages, this.ollamaEnrichmentModel);
   }
 
   private async callClaude(messages: ChatMessage[], maxTokens: number): Promise<string> {
@@ -90,8 +89,13 @@ export class LLMService {
     const response = await fetch(`${this.ollamaBaseUrl}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages, stream: false }),
-      signal: AbortSignal.timeout(60000),
+      body: JSON.stringify({
+        model,
+        messages,
+        stream: false,
+        options: { num_ctx: 8192 },  // expand context window to avoid truncation
+      }),
+      signal: AbortSignal.timeout(120000),  // 2 min — llama3.1:8b takes 30-60s
     });
 
     if (!response.ok) {
