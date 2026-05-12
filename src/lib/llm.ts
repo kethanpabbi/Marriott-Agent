@@ -94,7 +94,11 @@ export class LLMService {
         model,
         messages,
         stream: false,
-        options: { num_ctx: numCtx },
+        options: {
+          num_ctx: numCtx,
+          temperature: 0,      // greedy decoding — faster, deterministic
+          num_predict: 400,    // JSON output is ~150-250 tokens; stops post-JSON reasoning
+        },
       }),
       signal: AbortSignal.timeout(120000),
     });
