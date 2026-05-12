@@ -3,14 +3,55 @@ import { LLMService } from '../lib/llm';
 
 const prisma = new PrismaClient();
 
-function classifyBrand(nameLower: string): string {
-  if (["jw marriott", "ritz-carlton", "ritz carlton", "st. regis", "st regis", "saint-regis", "saint regis"].some(b => nameLower.includes(b))) return "Luxury";
-  if (["edition", "luxury collection", "w hotels", "w hotel", "the w "].some(b => nameLower.includes(b))) return "Distinctive Luxury";
-  if (["autograph collection", "design hotels", "mgm collection", "tribute portfolio", "outdoor collection"].some(b => nameLower.includes(b))) return "Collections";
-  if (["apartments by marriott", "element hotel", "element by", "homes & villas", "executive apartments", "residence inn", "towneplace"].some(b => nameLower.includes(b))) return "Longer Stays";
-  if (["ac hotels", "ac hotel", "aloft", "city express", "courtyard", "fairfield", "four points", "moxy", "protea", "springhill"].some(b => nameLower.includes(b))) return "Select";
-  if (["delta hotels", "gaylord", "le meridien", "le méridien", "marriott hotel", "marriott resort", "vacation club", "renaissance", "sheraton", "westin"].some(b => nameLower.includes(b))) return "Premium";
-  return "Premium";
+/**
+ * Normalise a hotel name for fuzzy matching:
+ * lowercase, strip filler words, remove punctuation, collapse whitespace.
+ */
+function normaliseName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\b(hotel|hotels|resort|resorts|the|a|an|by|and|&|marriott|bonvoy|autograph|collection|tribute|portfolio)\b/g, '')
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Find the best-matching DB hotel for an extracted hotel name.
+ * Returns null if no match scores above the 40% word-overlap threshold.
+ */
+function matchHotel(
+  extractedName: string,
+  dbHotels: { id: string; name: string }[]
+): { id: string; name: string } | null {
+  const extractedNorm = normaliseName(extractedName);
+  const extractedWords = extractedNorm.split(' ').filter(w => w.length > 2);
+  if (extractedWords.length === 0) return null;
+
+  let bestMatch: { id: string; name: string } | null = null;
+  let bestScore = 0;
+
+  for (const hotel of dbHotels) {
+    const dbNorm = normaliseName(hotel.name);
+    const dbWords = dbNorm.split(' ').filter(w => w.length > 2);
+    if (dbWords.length === 0) continue;
+
+    const extractedSet = new Set(extractedWords);
+    const dbSet = new Set(dbWords);
+
+    let overlap = 0;
+    for (const word of extractedSet) {
+      if (dbSet.has(word)) overlap++;
+    }
+
+    const score = overlap / Math.max(extractedSet.size, dbSet.size);
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = hotel;
+    }
+  }
+
+  return bestScore >= 0.4 ? bestMatch : null;
 }
 
 export class HotelsAgent {
@@ -26,14 +67,14 @@ export class HotelsAgent {
         where: {
           location: { contains: location },
           name: { contains: specificHotelName },
-          status: { not: "Closed" },
+          status: { not: 'Closed' },
         },
         include: { nearbyAttractions: true },
       });
     }
 
     return prisma.hotel.findMany({
-      where: { location: { contains: location }, status: { not: "Closed" } },
+      where: { location: { contains: location }, status: { not: 'Closed' } },
       orderBy: { rating: 'desc' },
       take: 10,
       include: { nearbyAttractions: true },
@@ -41,32 +82,46 @@ export class HotelsAgent {
   }
 
   /**
-   * Syncs a city by:
-   * 1. Searching DuckDuckGo (via Jina Reader, free) for "Hotels in {city} Marriott Bonvoy"
-   * 2. Extracting the Booking.com Marriott city page URL from results
-   * 3. Fetching that Booking.com page via Jina Reader (Booking.com is accessible; marriott.com is 403-blocked)
-   * 4. LLM extracts all hotels from the page content
-   * 5. Upserts to DB
-   * Skips entirely if data is < 7 days old.
+   * Enriches existing DB hotels for a location using Booking.com as the data source.
+   *
+   * Flow:
+   * 1. Load all DB hotels for the location — these are the ground-truth records.
+   * 2. Skip if enriched data is < 7 days old.
+   * 3. Search DuckDuckGo (via Jina Reader) for the Booking.com Marriott city page.
+   * 4. Fetch that page via Jina Reader.
+   * 5. LLM extracts hotel data (rating, price, amenities, etc.) from the page.
+   * 6. Fuzzy-match each extracted hotel to an existing DB record and UPDATE it.
+   *    No new rows are ever inserted — Booking.com is an enricher, not the source of truth.
    */
   async syncLocation(location: string, llmService: LLMService) {
-    // Staleness check
-    const newest = await prisma.hotel.findFirst({
-      where: { location: { contains: location }, description: { not: '' } },
-      orderBy: { lastUpdated: 'desc' },
+    // 1. Load existing DB hotels for this location
+    const dbHotels = await prisma.hotel.findMany({
+      where: { location: { contains: location }, status: { not: 'Closed' } },
+      select: { id: true, name: true, description: true, lastUpdated: true },
     });
-    if (newest) {
+
+    if (dbHotels.length === 0) {
+      console.log(`⚠️  No hotels in DB for "${location}" — skipping sync.`);
+      return false;
+    }
+
+    // 2. Staleness check — skip if enriched data is < 7 days old
+    const enriched = dbHotels.filter(h => h.description && h.description.trim() !== '');
+    if (enriched.length > 0) {
+      const newest = enriched.reduce((a, b) =>
+        new Date(a.lastUpdated) > new Date(b.lastUpdated) ? a : b
+      );
       const ageMs = Date.now() - new Date(newest.lastUpdated).getTime();
       if (ageMs < 7 * 24 * 60 * 60 * 1000) {
-        console.log(`✅ Fresh data for "${location}" — skipping sync.`);
+        console.log(`✅ Fresh data for "${location}" (${enriched.length}/${dbHotels.length} enriched) — skipping sync.`);
         return true;
       }
     }
 
-    console.log(`🔍 Searching for Marriott hotels in "${location}"...`);
+    console.log(`🔍 Enriching ${dbHotels.length} hotels for "${location}" via Booking.com...`);
 
     try {
-      // 1. DDG search — find the Booking.com Marriott city page
+      // 3. DDG search — find the Booking.com Marriott city page
       const query = encodeURIComponent(`Hotels in ${location} Marriott Bonvoy`);
       const ddgRes = await fetch(`https://r.jina.ai/https://lite.duckduckgo.com/lite/?q=${query}`, {
         headers: { 'Accept': 'text/plain', 'X-Return-Format': 'markdown' },
@@ -74,24 +129,19 @@ export class HotelsAgent {
       });
       const ddgContent = await ddgRes.text();
 
-      // 2. Extract Booking.com Marriott city URL from DDG results
-      //    DDG sometimes shows the plain URL, sometimes encodes it in uddg= redirect params
-      //    Format: https://www.booking.com/marriott/city/{iso-code}/{city}.html
+      // 4. Extract Booking.com Marriott city URL
       let bookingUrl: string | null = null;
 
-      // Try plain URL first
       const plainMatch = ddgContent.match(
         /https?:\/\/www\.booking\.com\/marriott\/city\/[a-z]{2}\/[a-z0-9\-]+\.html/i
       );
       if (plainMatch) bookingUrl = plainMatch[0];
 
-      // Try plain domain without protocol (DDG sometimes omits https)
       if (!bookingUrl) {
         const domainMatch = ddgContent.match(/www\.booking\.com\/marriott\/city\/[a-z]{2}\/[a-z0-9\-]+\.html/i);
         if (domainMatch) bookingUrl = `https://${domainMatch[0]}`;
       }
 
-      // Fallback: decode from uddg= encoded redirect parameter
       if (!bookingUrl) {
         const encodedMatch = ddgContent.match(
           /uddg=(https?%3A%2F%2Fwww\.booking\.com%2Fmarriott%2Fcity%2F[a-z]{2}%2F[^&\s"')]+\.html)/i
@@ -105,10 +155,7 @@ export class HotelsAgent {
 
       console.log(`🔗 Found Booking.com page: ${bookingUrl}`);
 
-      // Derive country from URL: /marriott/city/{iso-code}/{city}.html
-      const country = bookingUrl.match(/\/city\/([a-z]{2})\//)?.[1] || location;
-
-      // 3. Fetch the Booking.com page via Jina Reader
+      // 5. Fetch the Booking.com page via Jina Reader
       const pageRes = await fetch(`https://r.jina.ai/${bookingUrl}`, {
         headers: {
           'Accept': 'text/plain',
@@ -124,9 +171,9 @@ export class HotelsAgent {
         throw new Error(`Insufficient content from Booking.com (${pageContent.length} chars)`);
       }
 
-      console.log(`📄 Page fetched (${pageContent.length} chars). Extracting hotels...`);
+      console.log(`📄 Page fetched (${pageContent.length} chars). Extracting hotel data...`);
 
-      // 4. LLM extraction
+      // 6. LLM extraction
       const extractPrompt = `
         Extract every Marriott Bonvoy hotel listed on this page.
 
@@ -138,7 +185,7 @@ export class HotelsAgent {
           "name": "string",
           "rating": number,
           "description": "string (1 sentence max)",
-          "priceRange": "string (e.g. $200 - $450)",
+          "priceRange": "string (e.g. $200 - $450/night)",
           "amenities": "string (comma-separated, max 5)",
           "restaurants": "string (comma-separated, max 3)",
           "activities": "string (comma-separated, max 3)"
@@ -157,54 +204,50 @@ export class HotelsAgent {
       ], 8192);
 
       const jsonMatch = extractResponse.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error("No JSON in extraction response");
+      if (!jsonMatch) throw new Error('No JSON in extraction response');
 
       const { hotels } = JSON.parse(
         jsonMatch[0].replace(/,\s*]/g, ']').replace(/,\s*}/g, '}')
       );
 
-      if (!hotels?.length) throw new Error("No hotels extracted");
+      if (!hotels?.length) throw new Error('No hotels extracted from Booking.com page');
 
-      console.log(`🏨 Upserting ${hotels.length} properties for "${location}"...`);
+      console.log(`🏨 Matching ${hotels.length} extracted hotels against ${dbHotels.length} DB records...`);
 
-      // 5. Upsert all — no cap
+      // 7. Match each extracted hotel to an existing DB record and UPDATE it
+      let updated = 0;
+      let unmatched = 0;
+
       for (const h of hotels) {
-        const rating = typeof h.rating === 'number' ? h.rating : parseFloat(h.rating) || 0.0;
-        const tier = classifyBrand(h.name.toLowerCase());
+        const match = matchHotel(h.name, dbHotels);
 
-        await prisma.$executeRawUnsafe(`
-          INSERT INTO Hotel (id, name, location, country, url, description, priceRange, amenities, restaurants, activities, rating, tier, lastUpdated, status)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(name) DO UPDATE SET
-            location=excluded.location,
-            country=excluded.country,
-            url=excluded.url,
-            description=excluded.description,
-            priceRange=excluded.priceRange,
-            amenities=excluded.amenities,
-            restaurants=excluded.restaurants,
-            activities=excluded.activities,
-            rating=excluded.rating,
-            tier=excluded.tier,
-            lastUpdated=excluded.lastUpdated
-        `,
-          Math.random().toString(36).substring(7),
-          h.name,
-          location,
-          country,
-          bookingUrl,
-          h.description || "",
-          h.priceRange || "N/A",
-          h.amenities || "",
-          h.restaurants || "",
-          h.activities || "",
-          rating,
-          tier,
-          new Date().toISOString(),
-          "Open",
-        );
+        if (!match) {
+          console.log(`  ⚠️  No DB match for "${h.name}" — skipping`);
+          unmatched++;
+          continue;
+        }
+
+        const rating = typeof h.rating === 'number' ? h.rating : parseFloat(h.rating) || 0.0;
+
+        await prisma.hotel.update({
+          where: { id: match.id },
+          data: {
+            description: h.description || '',
+            priceRange: h.priceRange || '',
+            amenities: h.amenities || '',
+            restaurants: h.restaurants || '',
+            activities: h.activities || '',
+            rating,
+            url: bookingUrl,
+            enriched: true,
+          },
+        });
+
+        console.log(`  ✅ "${h.name}" → "${match.name}"`);
+        updated++;
       }
 
+      console.log(`✨ Enrichment complete for "${location}": ${updated} updated, ${unmatched} unmatched.`);
       return true;
     } catch (err) {
       console.error(`Sync failed for "${location}":`, err);
