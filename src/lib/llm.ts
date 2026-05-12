@@ -11,31 +11,6 @@ export class RateLimitError extends Error {
   }
 }
 
-/** Fields we need before we can stop the Ollama stream. */
-const ENRICHMENT_FIELDS = ['"rating"', '"description"', '"priceRange"', '"amenities"', '"restaurants"', '"activities"'];
-
-/**
- * Returns true once `text` contains a complete JSON object with all enrichment fields.
- * Detects completion by counting braces rather than regex, so it handles nested content.
- */
-function hasCompleteEnrichmentJson(text: string): boolean {
-  const start = text.indexOf('{');
-  if (start === -1) return false;
-
-  let depth = 0;
-  for (let i = start; i < text.length; i++) {
-    if (text[i] === '{') depth++;
-    else if (text[i] === '}') {
-      depth--;
-      if (depth === 0) {
-        const candidate = text.slice(start, i + 1);
-        return ENRICHMENT_FIELDS.every(f => candidate.includes(f));
-      }
-    }
-  }
-  return false;
-}
-
 export class LLMService {
   private provider: string;
   private apiKey: string;
@@ -54,16 +29,23 @@ export class LLMService {
     if (this.provider === 'claude') {
       return this.callClaude(messages, maxTokens);
     }
-    return this.callOllamaStream(messages, this.ollamaEnrichmentModel);
+    return this.callOllama(messages, this.ollamaEnrichmentModel);
   }
 
   /**
-   * Enrichment extraction — Ollama only, streaming.
-   * Stops the stream as soon as all required JSON fields are present.
-   * Never falls back to Claude — errors propagate so the caller skips that hotel.
+   * Enrichment extraction — Ollama only, never falls back to Claude.
+   * First attempt uses num_ctx 8192. On any failure, retries once with
+   * num_ctx 4096 (smaller window, faster inference). If that also fails
+   * the error propagates so the caller skips that hotel and moves on.
    */
   async generateEnrichmentResponse(messages: ChatMessage[]): Promise<string> {
-    return this.callOllamaStream(messages, this.ollamaEnrichmentModel, true);
+    try {
+      return await this.callOllama(messages, this.ollamaEnrichmentModel, 8192);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.log(`  🔄 Ollama failed (${reason}), retrying with smaller context...`);
+      return await this.callOllama(messages, this.ollamaEnrichmentModel, 4096);
+    }
   }
 
   private async callClaude(messages: ChatMessage[], maxTokens: number): Promise<string> {
@@ -104,69 +86,30 @@ export class LLMService {
     return data.content?.[0]?.text ?? 'Unexpected response format from Claude.';
   }
 
-  /**
-   * Streams an Ollama response token by token.
-   * For enrichment calls: cancels the stream as soon as a complete JSON with
-   * all required fields is detected — no need to wait for the model to finish.
-   * For chat calls: streams until the model signals done.
-   */
-  private async callOllamaStream(messages: ChatMessage[], model: string, isEnrichment = false): Promise<string> {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 min
+  private async callOllama(messages: ChatMessage[], model: string, numCtx = 8192): Promise<string> {
+    const response = await fetch(`${this.ollamaBaseUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages,
+        stream: false,
+        options: { num_ctx: numCtx },
+      }),
+      signal: AbortSignal.timeout(120000),
+    });
 
-    try {
-      const response = await fetch(`${this.ollamaBaseUrl}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          messages,
-          stream: true,
-          options: { num_ctx: 8192 },
-        }),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        const body = await response.text().catch(() => '');
-        if (response.status === 404 || body.includes('not found')) {
-          throw new Error(`model "${model}" not found — run: ollama pull ${model}`);
-        }
-        throw new Error(`Ollama HTTP ${response.status}: ${body}`);
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      if (response.status === 404 || body.includes('not found')) {
+        throw new Error(`model "${model}" not found — run: ollama pull ${model}`);
       }
-
-      const reader = response.body!.getReader();
-      const decoder = new TextDecoder();
-      let accumulated = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-
-        for (const line of chunk.split('\n')) {
-          if (!line.trim()) continue;
-          try {
-            const parsed = JSON.parse(line);
-            accumulated += parsed.message?.content ?? '';
-
-            // Stop as soon as we have all enrichment fields — don't wait for model to finish
-            if (isEnrichment && hasCompleteEnrichmentJson(accumulated)) {
-              reader.cancel();
-              return accumulated;
-            }
-
-            if (parsed.done) return accumulated;
-          } catch {
-            // Incomplete JSON line from stream — continue buffering
-          }
-        }
-      }
-
-      return accumulated;
-    } finally {
-      clearTimeout(timeoutId);
+      throw new Error(`Ollama HTTP ${response.status}: ${body}`);
     }
+
+    const data = await response.json();
+    const content = data.message?.content ?? '';
+    if (!content) throw new Error('Ollama returned empty content');
+    return content;
   }
 }

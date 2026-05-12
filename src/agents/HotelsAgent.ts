@@ -18,14 +18,13 @@ function futureDate(daysAhead: number): string {
 export class HotelsAgent {
   /**
    * Returns hotels for a location, optionally filtered by country.
-   * Results are sorted by rating descending (top 10).
+   * Results are sorted by rating descending.
    */
   async searchHotels(
     location: string,
     options: { specificHotelName?: string; country?: string } = {}
   ) {
     const { specificHotelName, country } = options;
-
     const countryFilter = country ? { country: { contains: country } } : {};
 
     if (specificHotelName) {
@@ -40,8 +39,6 @@ export class HotelsAgent {
       });
     }
 
-    // No take() cap — return all hotels so pickOnePerTier in WorkflowManager
-    // has a full pool across every tier, not just the top-rated few.
     return prisma.hotel.findMany({
       where: {
         location: { contains: location },
@@ -54,16 +51,15 @@ export class HotelsAgent {
   }
 
   /**
-   * Returns true if the location already has enriched, fresh (< 7 days old) data.
-   * Used by WorkflowManager to decide whether to await sync or run it in the background.
+   * Returns true if the location has at least one enriched hotel.
+   * Used by WorkflowManager to decide whether to show "loading" state.
    */
   async isEnriched(location: string, country?: string): Promise<boolean> {
     const countryFilter = country ? { country: { contains: country } } : {};
     const record = await prisma.hotel.findFirst({
       where: {
         location: { contains: location },
-        description: { not: '' },
-        lastUpdated: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+        enriched: true,
         ...countryFilter,
       },
     });
@@ -71,26 +67,17 @@ export class HotelsAgent {
   }
 
   /**
-   * Enriches existing DB hotels for a location by looking each one up
-   * individually on Booking.com — no fuzzy matching, no city list scraping.
-   *
-   * Booking.com URLs include checkin/checkout dates (7 and 8 days from now)
-   * so that nightly prices are shown rather than the undated fallback.
-   *
-   * Flow:
-   * 1. Load DB hotels for the location + country (ground truth).
-   * 2. Skip if enriched data is < 7 days old.
-   * 3. For each hotel (up to 10), search Booking.com by exact name,
-   *    fetch its dedicated hotel page with dates, and LLM-extract enrichment.
-   * 4. UPDATE the existing DB record — no inserts ever.
+   * Enriches hotels where enriched=false for the given location.
+   * Skips hotels already marked enriched=true.
+   * Stops entirely when no unenriched hotels remain.
    */
   async syncLocation(location: string, llmService: LLMService, country?: string) {
     const countryFilter = country ? { country: { contains: country } } : {};
 
-    // 1. Load existing DB hotels for this location
+    // Load all hotels, selecting enriched flag to drive decisions
     const dbHotels = await prisma.hotel.findMany({
       where: { location: { contains: location }, status: { not: 'Closed' }, ...countryFilter },
-      select: { id: true, name: true, tier: true, description: true, lastUpdated: true },
+      select: { id: true, name: true, tier: true, enriched: true, lastUpdated: true },
     });
 
     if (dbHotels.length === 0) {
@@ -98,27 +85,17 @@ export class HotelsAgent {
       return false;
     }
 
-    // 2. Staleness check — only skip when every hotel is already enriched and fresh.
-    //    If any unenriched hotels remain, always proceed so they get covered.
-    const enriched = dbHotels.filter(h => h.description && h.description.trim() !== '');
-    const unenrichedCount = dbHotels.length - enriched.length;
+    const unenriched = dbHotels.filter(h => !h.enriched);
 
-    if (unenrichedCount === 0 && enriched.length > 0) {
-      const newest = enriched.reduce((a, b) =>
-        new Date(a.lastUpdated) > new Date(b.lastUpdated) ? a : b
-      );
-      const ageMs = Date.now() - new Date(newest.lastUpdated).getTime();
-      if (ageMs < 7 * 24 * 60 * 60 * 1000) {
-        console.log(`✅ All ${enriched.length} hotels fresh for "${location}" — skipping sync.`);
-        return true;
-      }
+    // Nothing left to enrich
+    if (unenriched.length === 0) {
+      console.log(`✅ All ${dbHotels.length} hotels already enriched for "${location}" — skipping sync.`);
+      return true;
     }
 
-    if (unenrichedCount > 0) {
-      console.log(`🔄 ${unenrichedCount} unenriched hotels remaining for "${location}" — continuing enrichment.`);
-    }
+    console.log(`🔄 ${unenriched.length} unenriched hotels for "${location}" — continuing enrichment.`);
 
-    // 3. In-flight lock — skip if another sync is already running for this location
+    // In-flight lock — skip if another sync is already running for this location
     const lockKey = `${location}:${country ?? ''}`;
     if (syncingLocations.has(lockKey)) {
       console.log(`⏸️  Sync already in progress for "${location}" — skipping duplicate.`);
@@ -127,10 +104,8 @@ export class HotelsAgent {
     syncingLocations.add(lockKey);
 
     try {
-      // Pick hotels to enrich: up to 2 per tier so all tiers get coverage,
-      // prioritising unenriched hotels first, capped at 12 total.
+      // Pick up to 2 unenriched hotels per tier (12 total max) for this batch
       const TIERS = ['Luxury', 'Distinctive Luxury', 'Premium', 'Select', 'Longer Stays', 'Collections'];
-      const unenriched = dbHotels.filter(h => !h.description || h.description.trim() === '');
       const toEnrichSet = new Set<string>();
 
       for (const tier of TIERS) {
@@ -169,9 +144,9 @@ export class HotelsAgent {
   }
 
   /**
-   * Looks up a single hotel on Booking.com by name, fetches its page with
-   * check-in dates (today +7 / +8) so prices are visible, extracts enrichment
-   * data via LLM, and updates the DB record.
+   * Looks up a single hotel on Booking.com by name, fetches its dedicated page
+   * with check-in dates so prices are shown, extracts enrichment data via Ollama,
+   * and sets enriched=true on the DB record.
    */
   private async enrichHotel(
     hotel: { id: string; name: string },
@@ -189,8 +164,7 @@ export class HotelsAgent {
       );
       const ddgContent = await ddgRes.text();
 
-      // Extract the hotel's Booking.com URL
-      // Format: https://www.booking.com/hotel/{country-code}/{slug}.html
+      // Extract booking.com/hotel/{country}/{slug}.html URL
       let bookingUrl: string | null = null;
 
       const plainMatch = ddgContent.match(
@@ -210,18 +184,11 @@ export class HotelsAgent {
         return false;
       }
 
-      // Append check-in / check-out dates so prices are shown (1 night, 7 days ahead)
-      const checkin = futureDate(7);
-      const checkout = futureDate(8);
-      const urlWithDates = `${bookingUrl}?checkin=${checkin}&checkout=${checkout}&group_adults=2`;
+      // Add checkin/checkout dates so nightly prices are shown
+      const urlWithDates = `${bookingUrl}?checkin=${futureDate(7)}&checkout=${futureDate(8)}&group_adults=2`;
 
-      // Fetch the hotel page with dates
       const pageRes = await fetch(`https://r.jina.ai/${urlWithDates}`, {
-        headers: {
-          'Accept': 'text/plain',
-          'X-Return-Format': 'markdown',
-          'X-Timeout': '15',
-        },
+        headers: { 'Accept': 'text/plain', 'X-Return-Format': 'markdown', 'X-Timeout': '15' },
         signal: AbortSignal.timeout(25000),
       });
       if (!pageRes.ok) {
@@ -235,7 +202,6 @@ export class HotelsAgent {
         return false;
       }
 
-      // LLM extracts enrichment fields from the hotel page
       const extractPrompt = `
         Extract hotel details from this Booking.com page for "${hotel.name}".
 
@@ -254,14 +220,11 @@ export class HotelsAgent {
 
         Rules:
         - rating: if shown as x/10 divide by 2 to get x/5. Use 0 if not found.
-        - priceRange: look for the nightly rate shown for the selected dates. Use empty string if not found.
+        - priceRange: nightly rate for selected dates. Use empty string if not found.
         - Use empty string for any field you cannot find — never omit a key.
         - Output nothing outside the JSON.
       `;
 
-      // Use Ollama for extraction (free, no rate limits).
-      // Falls back to Claude only if Ollama is unreachable — throws RateLimitError
-      // if Claude hits its limit, which syncLocation catches to abort the loop.
       const extractResponse = await llmService.generateEnrichmentResponse([
         { role: 'system', content: 'You are a data extraction engine. Output ONLY valid JSON. No preamble.' },
         { role: 'user', content: extractPrompt },
@@ -286,14 +249,14 @@ export class HotelsAgent {
           activities: data.activities || '',
           rating,
           url: bookingUrl,
-          enriched: true,
+          enriched: true,  // mark done so it's never re-processed
         },
       });
 
       console.log(`  ✅ "${hotel.name}" enriched (★${rating}, ${data.priceRange || 'no price'})`);
       return true;
     } catch (err) {
-      if (err instanceof RateLimitError) throw err; // let syncLocation stop the loop
+      if (err instanceof RateLimitError) throw err;
       const reason = err instanceof Error ? err.message : String(err);
       console.log(`  ⚠️  Skipping "${hotel.name}": ${reason}`);
       return false;
