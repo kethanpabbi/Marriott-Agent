@@ -14,15 +14,15 @@ export class LLMService {
     this.baseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
   }
 
-  async generateResponse(messages: ChatMessage[]): Promise<string> {
+  async generateResponse(messages: ChatMessage[], maxTokens: number = 4096): Promise<string> {
     if (this.provider === 'claude') {
-      return this.callClaude(messages);
+      return this.callClaude(messages, maxTokens);
     } else {
       return this.callOllama(messages);
     }
   }
 
-  private async callClaude(messages: ChatMessage[]): Promise<string> {
+  private async callClaude(messages: ChatMessage[], maxTokens: number): Promise<string> {
     if (!this.apiKey || this.apiKey === 'your_claude_api_key_here') {
       return "MARRIOTT LUMINA: I'm currently in 'Offline Mode' as the Claude API key is not yet configured in .env.local. However, I can still show you the structure of our interactive concierge!";
     }
@@ -42,7 +42,7 @@ export class LLMService {
         },
         body: JSON.stringify({
           model: 'claude-haiku-4-5-20251001',
-          max_tokens: 4096,
+          max_tokens: maxTokens,
           messages: chatMessages.map(m => ({ role: m.role, content: m.content })),
           system: systemMessage
         })

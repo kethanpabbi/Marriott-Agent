@@ -12,6 +12,11 @@ interface Message {
 }
 
 export default function ChatInterface() {
+  // Fresh session ID every page load — each reload starts a clean conversation
+  const sessionId = useRef<string>(
+    `guest-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+  );
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -43,7 +48,7 @@ export default function ChatInterface() {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'guest@example.com', query: text })
+        body: JSON.stringify({ email: sessionId.current, query: text })
       });
       
       const data = await response.json();
