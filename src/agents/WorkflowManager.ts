@@ -75,6 +75,8 @@ export class WorkflowManager {
       }
 
       Rules:
+      - "inScope" is TRUE for: hotel searches, property information, Bonvoy membership questions, travel destination questions (best time to visit, local attractions, weather, events, things to do near a Marriott), dining recommendations, and anything that helps a guest plan or enjoy a Marriott stay.
+      - "inScope" is FALSE only for topics completely unrelated to travel or hospitality (e.g. politics, coding, finance).
       - "isSpecificHotelQuery" true if the user names a specific hotel.
       - "isBudgetQuery" true if the user asks for cheaper/budget/affordable options.
       - For ambiguous city names (Paris, Springfield, Richmond etc.) default to the most internationally known version unless the user specifies a country or state.
@@ -189,7 +191,7 @@ export class WorkflowManager {
       {
         role: 'system',
         content: `You are Marriott Lumina, a premium AI concierge for Marriott International.
-        Only discuss properties that are part of the Marriott Bonvoy portfolio.
+        You primarily help guests find and book Marriott Bonvoy properties, but you may also answer destination and travel questions (best time to visit, local attractions, weather, events, things to do) when they help a guest plan their stay. Always tie travel answers back to the Marriott experience where relevant.
 
         ${guestProfile}
 

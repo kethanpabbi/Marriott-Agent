@@ -1,5 +1,11 @@
 import { PrismaClient } from '@prisma/client';
-import { LLMService } from '../lib/llm';
+import { LLMService, RateLimitError } from '../lib/llm';
+
+/**
+ * Module-level lock — prevents concurrent background syncs for the same
+ * location from spawning duplicate enrichment requests.
+ */
+const syncingLocations = new Set<string>();
 
 const prisma = new PrismaClient();
 
@@ -112,34 +118,54 @@ export class HotelsAgent {
       console.log(`🔄 ${unenrichedCount} unenriched hotels remaining for "${location}" — continuing enrichment.`);
     }
 
-    // 3. Pick hotels to enrich: up to 2 per tier so all tiers get coverage,
-    //    prioritising unenriched hotels first, capped at 12 total.
-    const TIERS = ['Luxury', 'Distinctive Luxury', 'Premium', 'Select', 'Longer Stays', 'Collections'];
-    const unenriched = dbHotels.filter(h => !h.description || h.description.trim() === '');
-    const toEnrichSet = new Set<string>();
-
-    for (const tier of TIERS) {
-      const candidates = unenriched.filter(h => (h.tier || 'Premium') === tier);
-      candidates.slice(0, 2).forEach(h => toEnrichSet.add(h.id));
+    // 3. In-flight lock — skip if another sync is already running for this location
+    const lockKey = `${location}:${country ?? ''}`;
+    if (syncingLocations.has(lockKey)) {
+      console.log(`⏸️  Sync already in progress for "${location}" — skipping duplicate.`);
+      return false;
     }
-    // Top up with any remaining unenriched hotels until we hit 12
-    for (const h of unenriched) {
-      if (toEnrichSet.size >= 12) break;
-      toEnrichSet.add(h.id);
+    syncingLocations.add(lockKey);
+
+    try {
+      // Pick hotels to enrich: up to 2 per tier so all tiers get coverage,
+      // prioritising unenriched hotels first, capped at 12 total.
+      const TIERS = ['Luxury', 'Distinctive Luxury', 'Premium', 'Select', 'Longer Stays', 'Collections'];
+      const unenriched = dbHotels.filter(h => !h.description || h.description.trim() === '');
+      const toEnrichSet = new Set<string>();
+
+      for (const tier of TIERS) {
+        const candidates = unenriched.filter(h => (h.tier || 'Premium') === tier);
+        candidates.slice(0, 2).forEach(h => toEnrichSet.add(h.id));
+      }
+      for (const h of unenriched) {
+        if (toEnrichSet.size >= 12) break;
+        toEnrichSet.add(h.id);
+      }
+
+      const toEnrich = dbHotels.filter(h => toEnrichSet.has(h.id));
+      const tiersCount = TIERS.filter(t => toEnrich.some(h => (h.tier || 'Premium') === t)).length;
+      console.log(`🔍 Enriching ${toEnrich.length} hotels for "${location}" via Booking.com (${tiersCount} tiers)...`);
+
+      let updated = 0;
+      for (const hotel of toEnrich) {
+        try {
+          const success = await this.enrichHotel(hotel, llmService);
+          if (success) updated++;
+        } catch (err) {
+          if (err instanceof RateLimitError) {
+            console.error(`🛑 Rate limit hit — stopping enrichment for "${location}" after ${updated} hotels.`);
+            break;
+          }
+          console.error(`  ❌ Failed to enrich "${hotel.name}":`, err);
+        }
+        await new Promise(r => setTimeout(r, 600));
+      }
+
+      console.log(`✨ Enrichment complete for "${location}": ${updated}/${toEnrich.length} hotels updated.`);
+      return updated > 0;
+    } finally {
+      syncingLocations.delete(lockKey);
     }
-
-    const toEnrich = dbHotels.filter(h => toEnrichSet.has(h.id));
-    console.log(`🔍 Enriching ${toEnrich.length} hotels for "${location}" via Booking.com (covering ${TIERS.filter(t => toEnrich.some(h => (h.tier || 'Premium') === t)).length} tiers)...`);
-
-    let updated = 0;
-    for (const hotel of toEnrich) {
-      const success = await this.enrichHotel(hotel, llmService);
-      if (success) updated++;
-      await new Promise(r => setTimeout(r, 600));
-    }
-
-    console.log(`✨ Enrichment complete for "${location}": ${updated}/${toEnrich.length} hotels updated.`);
-    return updated > 0;
   }
 
   /**
@@ -233,10 +259,13 @@ export class HotelsAgent {
         - Output nothing outside the JSON.
       `;
 
-      const extractResponse = await llmService.generateResponse([
+      // Use Ollama for extraction (free, no rate limits).
+      // Falls back to Claude only if Ollama is unreachable — throws RateLimitError
+      // if Claude hits its limit, which syncLocation catches to abort the loop.
+      const extractResponse = await llmService.generateEnrichmentResponse([
         { role: 'system', content: 'You are a data extraction engine. Output ONLY valid JSON. No preamble.' },
         { role: 'user', content: extractPrompt },
-      ], 1024);
+      ]);
 
       const jsonMatch = extractResponse.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
