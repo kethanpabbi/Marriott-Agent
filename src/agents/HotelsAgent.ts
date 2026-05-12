@@ -208,21 +208,25 @@ export class HotelsAgent {
         PAGE CONTENT:
         ${pageContent.slice(0, 20000)}
 
-        Return ONLY a valid JSON object:
+        Return ONLY a valid JSON object with these exact keys:
         {
           "rating": number,
-          "description": "string (2 sentences max describing the hotel)",
-          "priceRange": "string (e.g. $200 - $450/night — use the currency shown on the page)",
-          "amenities": "string (comma-separated, max 5 highlights)",
-          "restaurants": "string (comma-separated, max 3 on-site dining options)",
-          "activities": "string (comma-separated, max 3 activities or nearby attractions)"
+          "description": "string",
+          "priceRange": "string",
+          "amenities": "string",
+          "restaurants": "string",
+          "activities": "string"
         }
 
-        Rules:
-        - rating: if shown as x/10 divide by 2 to get x/5. Use 0 if not found.
-        - priceRange: nightly rate for selected dates. Use empty string if not found.
-        - Use empty string for any field you cannot find — never omit a key.
-        - Output nothing outside the JSON.
+        Strict rules — follow exactly:
+        - rating: Find the numeric guest review score in the text. Booking.com scores are out of 10 — divide by 2 to convert to a 0–5 scale. Example: "8.6" → 4.3, "9.2" → 4.6. If no score is found, use 0. NEVER invent a score.
+        - priceRange: Copy the exact nightly price shown in the text (e.g. "$294/night", "€180 - €250/night"). If no price is visible in the text, use "". NEVER invent or estimate a price.
+        - description: 1–2 sentences from the page describing the hotel. If nothing useful, use "".
+        - amenities: Up to 5 amenities explicitly listed on the page, comma-separated. Use "" if none found.
+        - restaurants: Up to 3 dining options explicitly listed, comma-separated. Use "" if none found.
+        - activities: Up to 3 activities or nearby attractions explicitly listed, comma-separated. Use "" if none found.
+        - NEVER guess, invent, or infer any value. Only use what is explicitly written in the page content.
+        - Output nothing outside the JSON object.
       `;
 
       const extractResponse = await llmService.generateEnrichmentResponse([
@@ -237,7 +241,9 @@ export class HotelsAgent {
       }
 
       const data = JSON.parse(jsonMatch[0].replace(/,\s*]/g, ']').replace(/,\s*}/g, '}'));
-      const rating = typeof data.rating === 'number' ? data.rating : parseFloat(data.rating) || 0.0;
+      let rating = typeof data.rating === 'number' ? data.rating : parseFloat(data.rating) || 0.0;
+      // Booking.com scores are /10 — if model didn't convert, do it here
+      if (rating > 5) rating = parseFloat((rating / 2).toFixed(2));
 
       await prisma.hotel.update({
         where: { id: hotel.id },
