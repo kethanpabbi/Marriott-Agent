@@ -62,6 +62,16 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) and start chatting.
 
+### 5. Database Viewer (optional)
+
+To browse and inspect the SQLite database visually, run Prisma Studio in a separate terminal:
+
+```bash
+npx prisma studio
+```
+
+Opens at [http://localhost:5555](http://localhost:5555) — browse hotels, users, chat history, filter rows, and inspect synced data.
+
 ## 🧠 How It Works
 
 When a guest asks about a city:
