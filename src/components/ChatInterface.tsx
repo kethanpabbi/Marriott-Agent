@@ -46,7 +46,8 @@ export default function ChatInterface() {
 
     // Real API call
     try {
-      const response = await fetch('/api/agent', {
+      const endpoint = process.env.NEXT_PUBLIC_USE_AGENT === 'true' ? '/api/agent' : '/api/chat';
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: sessionId.current, query: text, managedSessionId })
