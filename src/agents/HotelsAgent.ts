@@ -219,7 +219,7 @@ export class HotelsAgent {
         }
 
         Strict rules — follow exactly:
-        - rating: Find the numeric guest review score in the text. Booking.com scores are out of 10 — divide by 2 to convert to a 0–5 scale. Example: "8.6" → 4.3, "9.2" → 4.6. If no score is found, use 0. NEVER invent a score.
+        - rating: Find the numeric guest review score in the text. Use it exactly as shown (Booking.com scores are out of 10, e.g. 8.6, 9.2). If no score is found, use 0. NEVER invent a score.
         - priceRange: Copy the exact nightly price shown in the text (e.g. "$294/night", "€180 - €250/night"). If no price is visible in the text, use "". NEVER invent or estimate a price.
         - description: 1–2 sentences from the page describing the hotel. If nothing useful, use "".
         - amenities: Up to 5 amenities explicitly listed on the page, comma-separated. Use "" if none found.
@@ -241,9 +241,7 @@ export class HotelsAgent {
       }
 
       const data = JSON.parse(jsonMatch[0].replace(/,\s*]/g, ']').replace(/,\s*}/g, '}'));
-      let rating = typeof data.rating === 'number' ? data.rating : parseFloat(data.rating) || 0.0;
-      // Booking.com scores are /10 — if model didn't convert, do it here
-      if (rating > 5) rating = parseFloat((rating / 2).toFixed(2));
+      const rating = typeof data.rating === 'number' ? data.rating : parseFloat(data.rating) || 0.0;
 
       await prisma.hotel.update({
         where: { id: hotel.id },
