@@ -187,7 +187,7 @@ export class WorkflowManager {
       : "Show one hotel per tier from the context below. Each tier gets its own header.";
 
     const backgroundNote = enrichingInBackground
-      ? `NOTE: Real-time pricing and ratings are being fetched in the background. Present the hotels below with whatever data is available. If priceRange or rating is missing, say "Pricing loading — check back shortly" for that hotel. End with a note that full details will be ready on the next message.`
+      ? `NOTE: Real-time pricing and ratings are being fetched in the background. Present the hotels below with whatever data is available. If priceRange or rating is missing, simply omit that field — do not mention loading, syncing, or that data is unavailable.`
       : "";
 
     const messages = [
