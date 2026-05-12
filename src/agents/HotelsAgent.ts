@@ -3,13 +3,24 @@ import { LLMService } from '../lib/llm';
 
 const prisma = new PrismaClient();
 
+/** Returns YYYY-MM-DD for a date offset by `daysAhead` from today. */
+function futureDate(daysAhead: number): string {
+  const d = new Date(Date.now() + daysAhead * 24 * 60 * 60 * 1000);
+  return d.toISOString().split('T')[0];
+}
+
 export class HotelsAgent {
   /**
-   * Returns hotels for a location sorted by rating (top 10).
-   * Pass specificHotelName to search for a single property by name.
+   * Returns hotels for a location, optionally filtered by country.
+   * Results are sorted by rating descending (top 10).
    */
-  async searchHotels(location: string, options: { specificHotelName?: string } = {}) {
-    const { specificHotelName } = options;
+  async searchHotels(
+    location: string,
+    options: { specificHotelName?: string; country?: string } = {}
+  ) {
+    const { specificHotelName, country } = options;
+
+    const countryFilter = country ? { country: { contains: country } } : {};
 
     if (specificHotelName) {
       return prisma.hotel.findMany({
@@ -17,13 +28,18 @@ export class HotelsAgent {
           location: { contains: location },
           name: { contains: specificHotelName },
           status: { not: 'Closed' },
+          ...countryFilter,
         },
         include: { nearbyAttractions: true },
       });
     }
 
     return prisma.hotel.findMany({
-      where: { location: { contains: location }, status: { not: 'Closed' } },
+      where: {
+        location: { contains: location },
+        status: { not: 'Closed' },
+        ...countryFilter,
+      },
       orderBy: { rating: 'desc' },
       take: 10,
       include: { nearbyAttractions: true },
@@ -31,20 +47,42 @@ export class HotelsAgent {
   }
 
   /**
+   * Returns true if the location already has enriched, fresh (< 7 days old) data.
+   * Used by WorkflowManager to decide whether to await sync or run it in the background.
+   */
+  async isEnriched(location: string, country?: string): Promise<boolean> {
+    const countryFilter = country ? { country: { contains: country } } : {};
+    const record = await prisma.hotel.findFirst({
+      where: {
+        location: { contains: location },
+        description: { not: '' },
+        lastUpdated: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+        ...countryFilter,
+      },
+    });
+    return record !== null;
+  }
+
+  /**
    * Enriches existing DB hotels for a location by looking each one up
    * individually on Booking.com — no fuzzy matching, no city list scraping.
    *
+   * Booking.com URLs include checkin/checkout dates (7 and 8 days from now)
+   * so that nightly prices are shown rather than the undated fallback.
+   *
    * Flow:
-   * 1. Load DB hotels for the location (ground truth).
+   * 1. Load DB hotels for the location + country (ground truth).
    * 2. Skip if enriched data is < 7 days old.
    * 3. For each hotel (up to 10), search Booking.com by exact name,
-   *    fetch its dedicated hotel page, and LLM-extract the enrichment fields.
+   *    fetch its dedicated hotel page with dates, and LLM-extract enrichment.
    * 4. UPDATE the existing DB record — no inserts ever.
    */
-  async syncLocation(location: string, llmService: LLMService) {
+  async syncLocation(location: string, llmService: LLMService, country?: string) {
+    const countryFilter = country ? { country: { contains: country } } : {};
+
     // 1. Load existing DB hotels for this location
     const dbHotels = await prisma.hotel.findMany({
-      where: { location: { contains: location }, status: { not: 'Closed' } },
+      where: { location: { contains: location }, status: { not: 'Closed' }, ...countryFilter },
       select: { id: true, name: true, description: true, lastUpdated: true },
     });
 
@@ -74,7 +112,6 @@ export class HotelsAgent {
     for (const hotel of toEnrich) {
       const success = await this.enrichHotel(hotel, llmService);
       if (success) updated++;
-      // small pause between requests to be respectful to Jina Reader
       await new Promise(r => setTimeout(r, 600));
     }
 
@@ -83,8 +120,9 @@ export class HotelsAgent {
   }
 
   /**
-   * Looks up a single hotel on Booking.com by name, extracts enrichment data,
-   * and updates its DB record.
+   * Looks up a single hotel on Booking.com by name, fetches its page with
+   * check-in dates (today +7 / +8) so prices are visible, extracts enrichment
+   * data via LLM, and updates the DB record.
    */
   private async enrichHotel(
     hotel: { id: string; name: string },
@@ -103,7 +141,7 @@ export class HotelsAgent {
       const ddgContent = await ddgRes.text();
 
       // Extract the hotel's Booking.com URL
-      // Format: https://www.booking.com/hotel/{country}/{slug}.html
+      // Format: https://www.booking.com/hotel/{country-code}/{slug}.html
       let bookingUrl: string | null = null;
 
       const plainMatch = ddgContent.match(
@@ -123,8 +161,13 @@ export class HotelsAgent {
         return false;
       }
 
-      // Fetch the hotel's dedicated Booking.com page
-      const pageRes = await fetch(`https://r.jina.ai/${bookingUrl}`, {
+      // Append check-in / check-out dates so prices are shown (1 night, 7 days ahead)
+      const checkin = futureDate(7);
+      const checkout = futureDate(8);
+      const urlWithDates = `${bookingUrl}?checkin=${checkin}&checkout=${checkout}&group_adults=2`;
+
+      // Fetch the hotel page with dates
+      const pageRes = await fetch(`https://r.jina.ai/${urlWithDates}`, {
         headers: {
           'Accept': 'text/plain',
           'X-Return-Format': 'markdown',
@@ -161,7 +204,8 @@ export class HotelsAgent {
         }
 
         Rules:
-        - rating: number between 0 and 10 if shown as /10, convert to /5 by halving. Use 0 if unknown.
+        - rating: if shown as x/10 divide by 2 to get x/5. Use 0 if not found.
+        - priceRange: look for the nightly rate shown for the selected dates. Use empty string if not found.
         - Use empty string for any field you cannot find — never omit a key.
         - Output nothing outside the JSON.
       `;
