@@ -92,17 +92,24 @@ export class HotelsAgent {
       return false;
     }
 
-    // 2. Staleness check — skip if enriched data is < 7 days old
+    // 2. Staleness check — only skip when every hotel is already enriched and fresh.
+    //    If any unenriched hotels remain, always proceed so they get covered.
     const enriched = dbHotels.filter(h => h.description && h.description.trim() !== '');
-    if (enriched.length > 0) {
+    const unenrichedCount = dbHotels.length - enriched.length;
+
+    if (unenrichedCount === 0 && enriched.length > 0) {
       const newest = enriched.reduce((a, b) =>
         new Date(a.lastUpdated) > new Date(b.lastUpdated) ? a : b
       );
       const ageMs = Date.now() - new Date(newest.lastUpdated).getTime();
       if (ageMs < 7 * 24 * 60 * 60 * 1000) {
-        console.log(`✅ Fresh data for "${location}" (${enriched.length}/${dbHotels.length} enriched) — skipping sync.`);
+        console.log(`✅ All ${enriched.length} hotels fresh for "${location}" — skipping sync.`);
         return true;
       }
+    }
+
+    if (unenrichedCount > 0) {
+      console.log(`🔄 ${unenrichedCount} unenriched hotels remaining for "${location}" — continuing enrichment.`);
     }
 
     // 3. Pick hotels to enrich: up to 2 per tier so all tiers get coverage,

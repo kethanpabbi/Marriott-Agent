@@ -123,21 +123,16 @@ export class WorkflowManager {
     const country = plan.activeCountry && plan.activeCountry !== 'none'
       ? plan.activeCountry.trim().toLowerCase() : undefined;
 
-    // 4. Sync strategy — if already enriched, await; if not, fire-and-forget so the
-    //    user gets basic results immediately while enrichment runs in the background.
+    // 4. Sync — always fire in the background so the user never waits.
+    //    syncLocation handles its own staleness check and skips instantly when
+    //    all hotels are already fresh. Unenriched hotels are always processed.
     let enrichingInBackground = false;
     if (location) {
       const alreadyEnriched = await hotelsAgent.isEnriched(location, country);
-      if (alreadyEnriched) {
-        // Staleness check only — returns instantly if data is fresh
-        await hotelsAgent.syncLocation(location, llmService, country);
-      } else {
-        // No enriched data yet — kick off enrichment without blocking the response
-        enrichingInBackground = true;
-        hotelsAgent.syncLocation(location, llmService, country).catch(err =>
-          console.error(`Background enrichment failed for "${location}":`, err)
-        );
-      }
+      enrichingInBackground = !alreadyEnriched;
+      hotelsAgent.syncLocation(location, llmService, country).catch(err =>
+        console.error(`Background enrichment failed for "${location}":`, err)
+      );
     }
 
     // 5. Retrieve hotels from DB (country-filtered to avoid cross-country matches)
