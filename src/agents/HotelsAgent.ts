@@ -1,213 +1,268 @@
 import { PrismaClient } from '@prisma/client';
-import { LLMService } from '../lib/llm';
+import { LLMService, RateLimitError } from '../lib/llm';
+
+/**
+ * Module-level lock — prevents concurrent background syncs for the same
+ * location from spawning duplicate enrichment requests.
+ */
+const syncingLocations = new Set<string>();
 
 const prisma = new PrismaClient();
 
-function classifyBrand(nameLower: string): string {
-  if (["jw marriott", "ritz-carlton", "ritz carlton", "st. regis", "st regis", "saint-regis", "saint regis"].some(b => nameLower.includes(b))) return "Luxury";
-  if (["edition", "luxury collection", "w hotels", "w hotel", "the w "].some(b => nameLower.includes(b))) return "Distinctive Luxury";
-  if (["autograph collection", "design hotels", "mgm collection", "tribute portfolio", "outdoor collection"].some(b => nameLower.includes(b))) return "Collections";
-  if (["apartments by marriott", "element hotel", "element by", "homes & villas", "executive apartments", "residence inn", "towneplace"].some(b => nameLower.includes(b))) return "Longer Stays";
-  if (["ac hotels", "ac hotel", "aloft", "city express", "courtyard", "fairfield", "four points", "moxy", "protea", "springhill"].some(b => nameLower.includes(b))) return "Select";
-  if (["delta hotels", "gaylord", "le meridien", "le méridien", "marriott hotel", "marriott resort", "vacation club", "renaissance", "sheraton", "westin"].some(b => nameLower.includes(b))) return "Premium";
-  return "Premium";
+/** Returns YYYY-MM-DD for a date offset by `daysAhead` from today. */
+function futureDate(daysAhead: number): string {
+  const d = new Date(Date.now() + daysAhead * 24 * 60 * 60 * 1000);
+  return d.toISOString().split('T')[0];
 }
 
 export class HotelsAgent {
   /**
-   * Returns hotels for a location sorted by rating (top 10).
-   * Pass specificHotelName to search for a single property by name.
+   * Returns hotels for a location, optionally filtered by country.
+   * Results are sorted by rating descending.
    */
-  async searchHotels(location: string, options: { specificHotelName?: string } = {}) {
-    const { specificHotelName } = options;
+  async searchHotels(
+    location: string,
+    options: { specificHotelName?: string; country?: string } = {}
+  ) {
+    const { specificHotelName, country } = options;
+    const countryFilter = country ? { country: { contains: country } } : {};
 
     if (specificHotelName) {
       return prisma.hotel.findMany({
         where: {
           location: { contains: location },
           name: { contains: specificHotelName },
-          status: { not: "Closed" },
+          status: { not: 'Closed' },
+          ...countryFilter,
         },
         include: { nearbyAttractions: true },
       });
     }
 
     return prisma.hotel.findMany({
-      where: { location: { contains: location }, status: { not: "Closed" } },
-      orderBy: { rating: 'desc' },
-      take: 10,
+      where: {
+        location: { contains: location },
+        status: { not: 'Closed' },
+        ...countryFilter,
+      },
+      orderBy: [{ rating: 'desc' }],
       include: { nearbyAttractions: true },
     });
   }
 
   /**
-   * Syncs a city by:
-   * 1. Searching DuckDuckGo (via Jina Reader, free) for "Hotels in {city} Marriott Bonvoy"
-   * 2. Extracting the Booking.com Marriott city page URL from results
-   * 3. Fetching that Booking.com page via Jina Reader (Booking.com is accessible; marriott.com is 403-blocked)
-   * 4. LLM extracts all hotels from the page content
-   * 5. Upserts to DB
-   * Skips entirely if data is < 7 days old.
+   * Returns true if the location has at least one enriched hotel.
+   * Used by WorkflowManager to decide whether to show "loading" state.
    */
-  async syncLocation(location: string, llmService: LLMService) {
-    // Staleness check
-    const newest = await prisma.hotel.findFirst({
-      where: { location: { contains: location }, description: { not: '' } },
-      orderBy: { lastUpdated: 'desc' },
+  async isEnriched(location: string, country?: string): Promise<boolean> {
+    const countryFilter = country ? { country: { contains: country } } : {};
+    const record = await prisma.hotel.findFirst({
+      where: {
+        location: { contains: location },
+        enriched: true,
+        ...countryFilter,
+      },
     });
-    if (newest) {
-      const ageMs = Date.now() - new Date(newest.lastUpdated).getTime();
-      if (ageMs < 7 * 24 * 60 * 60 * 1000) {
-        console.log(`✅ Fresh data for "${location}" — skipping sync.`);
-        return true;
-      }
+    return record !== null;
+  }
+
+  /**
+   * Enriches hotels where enriched=false for the given location.
+   * Skips hotels already marked enriched=true.
+   * Stops entirely when no unenriched hotels remain.
+   */
+  async syncLocation(location: string, llmService: LLMService, country?: string) {
+    const countryFilter = country ? { country: { contains: country } } : {};
+
+    // Load all hotels, selecting enriched flag to drive decisions
+    const dbHotels = await prisma.hotel.findMany({
+      where: { location: { contains: location }, status: { not: 'Closed' }, ...countryFilter },
+      select: { id: true, name: true, tier: true, enriched: true, lastUpdated: true },
+    });
+
+    if (dbHotels.length === 0) {
+      console.log(`⚠️  No hotels in DB for "${location}" — skipping sync.`);
+      return false;
     }
 
-    console.log(`🔍 Searching for Marriott hotels in "${location}"...`);
+    const unenriched = dbHotels.filter(h => !h.enriched);
+
+    // Nothing left to enrich
+    if (unenriched.length === 0) {
+      console.log(`✅ All ${dbHotels.length} hotels already enriched for "${location}" — skipping sync.`);
+      return true;
+    }
+
+    console.log(`🔄 ${unenriched.length} unenriched hotels for "${location}" — continuing enrichment.`);
+
+    // In-flight lock — skip if another sync is already running for this location
+    const lockKey = `${location}:${country ?? ''}`;
+    if (syncingLocations.has(lockKey)) {
+      console.log(`⏸️  Sync already in progress for "${location}" — skipping duplicate.`);
+      return false;
+    }
+    syncingLocations.add(lockKey);
 
     try {
-      // 1. DDG search — find the Booking.com Marriott city page
-      const query = encodeURIComponent(`Hotels in ${location} Marriott Bonvoy`);
-      const ddgRes = await fetch(`https://r.jina.ai/https://lite.duckduckgo.com/lite/?q=${query}`, {
-        headers: { 'Accept': 'text/plain', 'X-Return-Format': 'markdown' },
-        signal: AbortSignal.timeout(20000),
-      });
+      // Pick up to 2 unenriched hotels per tier (12 total max) for this batch
+      const TIERS = ['Luxury', 'Distinctive Luxury', 'Premium', 'Select', 'Longer Stays', 'Collections'];
+      const toEnrichSet = new Set<string>();
+
+      for (const tier of TIERS) {
+        const candidates = unenriched.filter(h => (h.tier || 'Premium') === tier);
+        candidates.slice(0, 2).forEach(h => toEnrichSet.add(h.id));
+      }
+      for (const h of unenriched) {
+        if (toEnrichSet.size >= 12) break;
+        toEnrichSet.add(h.id);
+      }
+
+      const toEnrich = dbHotels.filter(h => toEnrichSet.has(h.id));
+      const tiersCount = TIERS.filter(t => toEnrich.some(h => (h.tier || 'Premium') === t)).length;
+      console.log(`🔍 Enriching ${toEnrich.length} hotels for "${location}" via Booking.com (${tiersCount} tiers)...`);
+
+      let updated = 0;
+      for (const hotel of toEnrich) {
+        try {
+          const success = await this.enrichHotel(hotel, llmService);
+          if (success) updated++;
+        } catch (err) {
+          if (err instanceof RateLimitError) {
+            console.error(`🛑 Rate limit hit — stopping enrichment for "${location}" after ${updated} hotels.`);
+            break;
+          }
+          console.error(`  ❌ Failed to enrich "${hotel.name}":`, err);
+        }
+        await new Promise(r => setTimeout(r, 600));
+      }
+
+      console.log(`✨ Enrichment complete for "${location}": ${updated}/${toEnrich.length} hotels updated.`);
+      return updated > 0;
+    } finally {
+      syncingLocations.delete(lockKey);
+    }
+  }
+
+  /**
+   * Looks up a single hotel on Booking.com by name, fetches its dedicated page
+   * with check-in dates so prices are shown, extracts enrichment data via Ollama,
+   * and sets enriched=true on the DB record.
+   */
+  private async enrichHotel(
+    hotel: { id: string; name: string },
+    llmService: LLMService
+  ): Promise<boolean> {
+    try {
+      // Search DuckDuckGo for this hotel's Booking.com page
+      const query = encodeURIComponent(`${hotel.name} site:booking.com`);
+      const ddgRes = await fetch(
+        `https://r.jina.ai/https://lite.duckduckgo.com/lite/?q=${query}`,
+        {
+          headers: { 'Accept': 'text/plain', 'X-Return-Format': 'markdown' },
+          signal: AbortSignal.timeout(15000),
+        }
+      );
       const ddgContent = await ddgRes.text();
 
-      // 2. Extract Booking.com Marriott city URL from DDG results
-      //    DDG sometimes shows the plain URL, sometimes encodes it in uddg= redirect params
-      //    Format: https://www.booking.com/marriott/city/{iso-code}/{city}.html
+      // Extract booking.com/hotel/{country}/{slug}.html URL
       let bookingUrl: string | null = null;
 
-      // Try plain URL first
       const plainMatch = ddgContent.match(
-        /https?:\/\/www\.booking\.com\/marriott\/city\/[a-z]{2}\/[a-z0-9\-]+\.html/i
+        /https?:\/\/www\.booking\.com\/hotel\/[a-z]{2}\/[^)\s"'<>]+\.html/i
       );
       if (plainMatch) bookingUrl = plainMatch[0];
 
-      // Try plain domain without protocol (DDG sometimes omits https)
-      if (!bookingUrl) {
-        const domainMatch = ddgContent.match(/www\.booking\.com\/marriott\/city\/[a-z]{2}\/[a-z0-9\-]+\.html/i);
-        if (domainMatch) bookingUrl = `https://${domainMatch[0]}`;
-      }
-
-      // Fallback: decode from uddg= encoded redirect parameter
       if (!bookingUrl) {
         const encodedMatch = ddgContent.match(
-          /uddg=(https?%3A%2F%2Fwww\.booking\.com%2Fmarriott%2Fcity%2F[a-z]{2}%2F[^&\s"')]+\.html)/i
+          /uddg=(https?%3A%2F%2Fwww\.booking\.com%2Fhotel%2F[a-z]{2}%2F[^&\s"')]+\.html)/i
         );
         if (encodedMatch) bookingUrl = decodeURIComponent(encodedMatch[1]);
       }
 
       if (!bookingUrl) {
-        throw new Error(`Could not find a Booking.com Marriott page for "${location}" in search results`);
+        console.log(`  ⚠️  No Booking.com page found for "${hotel.name}"`);
+        return false;
       }
 
-      console.log(`🔗 Found Booking.com page: ${bookingUrl}`);
+      // Add checkin/checkout dates so nightly prices are shown
+      const urlWithDates = `${bookingUrl}?checkin=${futureDate(7)}&checkout=${futureDate(8)}&group_adults=2`;
 
-      // Derive country from URL: /marriott/city/{iso-code}/{city}.html
-      const country = bookingUrl.match(/\/city\/([a-z]{2})\//)?.[1] || location;
-
-      // 3. Fetch the Booking.com page via Jina Reader
-      const pageRes = await fetch(`https://r.jina.ai/${bookingUrl}`, {
-        headers: {
-          'Accept': 'text/plain',
-          'X-Return-Format': 'markdown',
-          'X-Timeout': '20',
-        },
-        signal: AbortSignal.timeout(35000),
+      const pageRes = await fetch(`https://r.jina.ai/${urlWithDates}`, {
+        headers: { 'Accept': 'text/plain', 'X-Return-Format': 'markdown', 'X-Timeout': '15' },
+        signal: AbortSignal.timeout(25000),
       });
-      if (!pageRes.ok) throw new Error(`Booking.com fetch failed: ${pageRes.status}`);
+      if (!pageRes.ok) {
+        console.log(`  ⚠️  Booking.com fetch failed for "${hotel.name}" (${pageRes.status})`);
+        return false;
+      }
 
       const pageContent = await pageRes.text();
-      if (pageContent.length < 2000) {
-        throw new Error(`Insufficient content from Booking.com (${pageContent.length} chars)`);
+      if (pageContent.length < 500) {
+        console.log(`  ⚠️  Too little content for "${hotel.name}" (${pageContent.length} chars)`);
+        return false;
       }
 
-      console.log(`📄 Page fetched (${pageContent.length} chars). Extracting hotels...`);
-
-      // 4. LLM extraction
       const extractPrompt = `
-        Extract every Marriott Bonvoy hotel listed on this page.
+        Extract hotel details from this Booking.com page for "${hotel.name}".
 
         PAGE CONTENT:
-        ${pageContent.slice(0, 40000)}
+        ${pageContent.slice(0, 20000)}
 
-        Return ONLY a valid JSON object:
-        { "hotels": [{
-          "name": "string",
+        Return ONLY a valid JSON object with these exact keys:
+        {
           "rating": number,
-          "description": "string (1 sentence max)",
-          "priceRange": "string (e.g. $200 - $450)",
-          "amenities": "string (comma-separated, max 5)",
-          "restaurants": "string (comma-separated, max 3)",
-          "activities": "string (comma-separated, max 3)"
-        }] }
+          "description": "string",
+          "priceRange": "string",
+          "amenities": "string",
+          "restaurants": "string",
+          "activities": "string"
+        }
 
-        Rules:
-        - Include EVERY Marriott/Bonvoy branded hotel — do not skip any.
-        - rating must be a number between 0 and 5 (use 0 if unknown).
-        - Use empty string for unknown fields — never omit a key.
-        - Output nothing outside the JSON.
+        Strict rules — follow exactly:
+        - rating: Find the numeric guest review score in the text. Use it exactly as shown (Booking.com scores are out of 10, e.g. 8.6, 9.2). If no score is found, use 0. NEVER invent a score.
+        - priceRange: Copy the exact nightly price shown in the text (e.g. "$294/night", "€180 - €250/night"). If no price is visible in the text, use "". NEVER invent or estimate a price.
+        - description: 1–2 sentences from the page describing the hotel. If nothing useful, use "".
+        - amenities: Up to 5 amenities explicitly listed on the page, comma-separated. Use "" if none found.
+        - restaurants: Up to 3 dining options explicitly listed, comma-separated. Use "" if none found.
+        - activities: Up to 3 activities or nearby attractions explicitly listed, comma-separated. Use "" if none found.
+        - NEVER guess, invent, or infer any value. Only use what is explicitly written in the page content.
+        - Output nothing outside the JSON object.
       `;
 
-      const extractResponse = await llmService.generateResponse([
+      const extractResponse = await llmService.generateEnrichmentResponse([
         { role: 'system', content: 'You are a data extraction engine. Output ONLY valid JSON. No preamble.' },
         { role: 'user', content: extractPrompt },
-      ], 8192);
+      ]);
 
       const jsonMatch = extractResponse.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error("No JSON in extraction response");
-
-      const { hotels } = JSON.parse(
-        jsonMatch[0].replace(/,\s*]/g, ']').replace(/,\s*}/g, '}')
-      );
-
-      if (!hotels?.length) throw new Error("No hotels extracted");
-
-      console.log(`🏨 Upserting ${hotels.length} properties for "${location}"...`);
-
-      // 5. Upsert all — no cap
-      for (const h of hotels) {
-        const rating = typeof h.rating === 'number' ? h.rating : parseFloat(h.rating) || 0.0;
-        const tier = classifyBrand(h.name.toLowerCase());
-
-        await prisma.$executeRawUnsafe(`
-          INSERT INTO Hotel (id, name, location, country, url, description, priceRange, amenities, restaurants, activities, rating, tier, lastUpdated, status)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(name) DO UPDATE SET
-            location=excluded.location,
-            country=excluded.country,
-            url=excluded.url,
-            description=excluded.description,
-            priceRange=excluded.priceRange,
-            amenities=excluded.amenities,
-            restaurants=excluded.restaurants,
-            activities=excluded.activities,
-            rating=excluded.rating,
-            tier=excluded.tier,
-            lastUpdated=excluded.lastUpdated
-        `,
-          Math.random().toString(36).substring(7),
-          h.name,
-          location,
-          country,
-          bookingUrl,
-          h.description || "",
-          h.priceRange || "N/A",
-          h.amenities || "",
-          h.restaurants || "",
-          h.activities || "",
-          rating,
-          tier,
-          new Date().toISOString(),
-          "Open",
-        );
+      if (!jsonMatch) {
+        console.log(`  ⚠️  No JSON returned for "${hotel.name}"`);
+        return false;
       }
 
+      const data = JSON.parse(jsonMatch[0].replace(/,\s*]/g, ']').replace(/,\s*}/g, '}'));
+      const rating = typeof data.rating === 'number' ? data.rating : parseFloat(data.rating) || 0.0;
+
+      await prisma.hotel.update({
+        where: { id: hotel.id },
+        data: {
+          description: data.description || '',
+          priceRange: data.priceRange || '',
+          amenities: data.amenities || '',
+          restaurants: data.restaurants || '',
+          activities: data.activities || '',
+          rating,
+          url: bookingUrl,
+          enriched: true,  // mark done so it's never re-processed
+        },
+      });
+
+      console.log(`  ✅ "${hotel.name}" enriched (★${rating}, ${data.priceRange || 'no price'})`);
       return true;
     } catch (err) {
-      console.error(`Sync failed for "${location}":`, err);
+      if (err instanceof RateLimitError) throw err;
+      const reason = err instanceof Error ? err.message : String(err);
+      console.log(`  ⚠️  Skipping "${hotel.name}": ${reason}`);
       return false;
     }
   }

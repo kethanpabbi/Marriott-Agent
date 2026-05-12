@@ -22,7 +22,7 @@ export default function ChatInterface() {
       id: '1',
       role: 'assistant',
       content: "Welcome to Marriott Lumina. I'm your premium AI concierge. How can I assist you with your Marriott experience today?",
-      suggestions: ["Find a hotel in Paris", "What are the best beach resorts?", "How do I check my Bonvoy points?"]
+      suggestions: ["Hotels in Paris, France", "Luxury beach resort in Maldives", "Romantic getaway in Rome"]
     }
   ]);
   const [input, setInput] = useState('');

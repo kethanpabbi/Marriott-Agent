@@ -6,6 +6,45 @@ const userAgent = new UserAgent();
 const hotelsAgent = new HotelsAgent();
 const llmService = new LLMService();
 
+const TIER_ORDER = ['Luxury', 'Distinctive Luxury', 'Premium', 'Select', 'Longer Stays', 'Collections'];
+
+/**
+ * Pick the best hotel from each available tier.
+ * - Prefers enriched hotels (have a description) over unenriched ones.
+ * - Within enriched: sorts by rating desc (or price asc for budget queries).
+ * - Falls back to unenriched hotels so every tier is always represented.
+ */
+function pickOnePerTier(hotels: any[], isBudgetQuery: boolean): any[] {
+  const byTier: Record<string, any[]> = {};
+  for (const h of hotels) {
+    const tier = h.tier || 'Premium';
+    if (!byTier[tier]) byTier[tier] = [];
+    byTier[tier].push(h);
+  }
+
+  const result: any[] = [];
+  for (const tier of TIER_ORDER) {
+    const candidates = byTier[tier];
+    if (!candidates?.length) continue;
+
+    const enriched = candidates.filter(h => h.description && h.description.trim() !== '');
+    const pool = enriched.length > 0 ? enriched : candidates; // fall back to unenriched
+
+    if (isBudgetQuery) {
+      pool.sort((a, b) => {
+        const priceA = parseFloat(a.priceRange?.replace(/[^0-9.]/g, '') || '99999');
+        const priceB = parseFloat(b.priceRange?.replace(/[^0-9.]/g, '') || '99999');
+        return priceA - priceB;
+      });
+    } else {
+      pool.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+    }
+
+    result.push(pool[0]);
+  }
+  return result;
+}
+
 export class WorkflowManager {
   async processQuery(email: string, query: string) {
     // 1. Security check
@@ -19,7 +58,7 @@ export class WorkflowManager {
       userAgent.getOrCreateUser(email),
     ]);
 
-    // 2. Reasoning step — extracts location, intent, and query type
+    // 2. Reasoning step — extracts location, country, intent, and query type
     const reasoningPrompt = `
       Analyze the user's query and conversation history.
 
@@ -27,6 +66,7 @@ export class WorkflowManager {
       {
         "inScope": boolean,
         "activeLocation": "city name in lowercase, or 'none'",
+        "activeCountry": "most likely country in lowercase (e.g. 'france' for Paris, 'united kingdom' for London). If ambiguous and the user did not specify, infer the most internationally prominent city of that name. Return 'none' if no location.",
         "isSpecificHotelQuery": boolean,
         "specificHotelName": "hotel name if asking about one specific property, else null",
         "isBudgetQuery": boolean,
@@ -35,8 +75,11 @@ export class WorkflowManager {
       }
 
       Rules:
+      - "inScope" is TRUE for: hotel searches, property information, Bonvoy membership questions, travel destination questions (best time to visit, local attractions, weather, events, things to do near a Marriott), dining recommendations, and anything that helps a guest plan or enjoy a Marriott stay.
+      - "inScope" is FALSE only for topics completely unrelated to travel or hospitality (e.g. politics, coding, finance).
       - "isSpecificHotelQuery" true if the user names a specific hotel.
       - "isBudgetQuery" true if the user asks for cheaper/budget/affordable options.
+      - For ambiguous city names (Paris, Springfield, Richmond etc.) default to the most internationally known version unless the user specifies a country or state.
 
       History: ${JSON.stringify(history.slice(-5))}
       Query: ${query}
@@ -60,6 +103,7 @@ export class WorkflowManager {
     } catch {
       plan = {
         activeLocation: "none",
+        activeCountry: "none",
         isSpecificHotelQuery: false, specificHotelName: null, isBudgetQuery: false,
         userProfileUpdate: { likes: [], dislikes: [] }, reasoning: "Fallback",
       };
@@ -76,29 +120,42 @@ export class WorkflowManager {
       user.dislikes = newDislikes;
     }
 
-    const location = plan.activeLocation && plan.activeLocation !== "none" ? plan.activeLocation.trim().toLowerCase() : null;
+    const location = plan.activeLocation && plan.activeLocation !== 'none'
+      ? plan.activeLocation.trim().toLowerCase() : null;
+    const country = plan.activeCountry && plan.activeCountry !== 'none'
+      ? plan.activeCountry.trim().toLowerCase() : undefined;
 
-    // 4. Sync — always attempt; syncLocation skips instantly if data is < 7 days old
+    // 4. Sync — always fire in the background so the user never waits.
+    //    syncLocation handles its own staleness check and skips instantly when
+    //    all hotels are already fresh. Unenriched hotels are always processed.
+    let enrichingInBackground = false;
     if (location) {
-      await hotelsAgent.syncLocation(location, llmService);
+      const alreadyEnriched = await hotelsAgent.isEnriched(location, country);
+      enrichingInBackground = !alreadyEnriched;
+      hotelsAgent.syncLocation(location, llmService, country).catch(err =>
+        console.error(`Background enrichment failed for "${location}":`, err)
+      );
     }
 
-    // 5. Retrieve hotels
+    // 5. Retrieve hotels from DB (country-filtered to avoid cross-country matches)
     let hotels: any[] = [];
     if (location) {
       hotels = await hotelsAgent.searchHotels(location, {
         specificHotelName: plan.isSpecificHotelQuery ? plan.specificHotelName : undefined,
+        country,
       });
     }
 
-    // 6. Apply display limit:
-    //    - Specific hotel query → show whatever matches (could be 1)
-    //    - Budget query → top 5 by rating from the fetched pool (already sorted desc)
-    //    - Default → top 5 by rating
-    const displayHotels = plan.isSpecificHotelQuery ? hotels : hotels.slice(0, 5);
+    // 6. Pick one hotel per tier (best rated, or cheapest if budget query).
+    //    For specific hotel queries, show all matches.
+    const displayHotels = plan.isSpecificHotelQuery
+      ? hotels
+      : pickOnePerTier(hotels, plan.isBudgetQuery);
 
     // 7. Generate response
-    const { response, suggestions } = await this.generateAIResponse(displayHotels, query, user, history, plan.isBudgetQuery);
+    const { response, suggestions } = await this.generateAIResponse(
+      displayHotels, query, user, history, plan.isBudgetQuery, enrichingInBackground
+    );
 
     await Promise.all([
       userAgent.logInteraction(email, 'user', query),
@@ -114,6 +171,7 @@ export class WorkflowManager {
     user: any,
     history: any[],
     isBudgetQuery: boolean,
+    enrichingInBackground: boolean,
   ): Promise<{ response: string; suggestions: string[] }> {
     const guestProfile = `
       GUEST PREFERENCES:
@@ -121,15 +179,19 @@ export class WorkflowManager {
       - Dislikes: ${user.dislikes.join(', ') || 'None yet'}
     `;
 
-    const budgetInstruction = isBudgetQuery
-      ? "The guest is looking for more affordable options. From the hotels below, highlight those with the lowest priceRange while still maintaining quality. Rank by value for money."
-      : "Present the top 5 hotels shown below, ordered by rating (highest first).";
+    const displayInstruction = isBudgetQuery
+      ? "The guest wants affordable options. Show one hotel per tier (cheapest in each tier). Lead with the most budget-friendly."
+      : "Show one hotel per tier from the context below. Each tier gets its own header.";
+
+    const backgroundNote = enrichingInBackground
+      ? `NOTE: Real-time pricing and ratings are being fetched in the background. Present the hotels below with whatever data is available. If priceRange or rating is missing, simply omit that field — do not mention loading, syncing, or that data is unavailable.`
+      : "";
 
     const messages = [
       {
         role: 'system',
         content: `You are Marriott Lumina, a premium AI concierge for Marriott International.
-        Only discuss properties that are part of the Marriott Bonvoy portfolio.
+        You primarily help guests find and book Marriott Bonvoy properties, but you may also answer destination and travel questions (best time to visit, local attractions, weather, events, things to do) when they help a guest plan their stay. Always tie travel answers back to the Marriott experience where relevant.
 
         ${guestProfile}
 
@@ -137,9 +199,11 @@ export class WorkflowManager {
         - If "GROUND TRUTH CONTEXT" is EMPTY, do NOT mention specific hotels. Tell the guest the directory is syncing and to try again shortly.
         - NEVER invent hotel names not present in the context.
 
+        ${backgroundNote}
+
         DISPLAY RULES:
-        - ${budgetInstruction}
-        - Group hotels under the correct tier headers (only include headers that have hotels):
+        - ${displayInstruction}
+        - Group hotels under the correct tier headers (only include tiers that have a hotel):
           ### Luxury
           ### Distinctive Luxury
           ### Premium
@@ -147,7 +211,7 @@ export class WorkflowManager {
           ### Longer Stays
           ### Collections
         - Use **Hotel Name** format for every property.
-        - Include priceRange and rating (⭐) for each hotel.
+        - Include priceRange and rating for each hotel where available. Show rating as ⭐ 8.6 (star icon followed by the score, exactly as Booking.com displays it).
         - If amenities/restaurants/activities are available, mention 1-2 highlights per hotel.
         - End every hotel list response with a question about budget or length of stay.
 
@@ -157,13 +221,13 @@ export class WorkflowManager {
         GROUND TRUTH CONTEXT:
         ${hotels.map(h => `
           Name: ${h.name}
-          Tier: ${h.tier || "Premium"}
-          Rating: ${h.rating}
-          PriceRange: ${h.priceRange}
-          Description: ${h.description}
-          Amenities: ${h.amenities}
-          Restaurants: ${h.restaurants}
-          Activities: ${h.activities}
+          Tier: ${h.tier || 'Premium'}
+          Rating: ${h.rating || 'unknown'}
+          PriceRange: ${h.priceRange || 'unknown'}
+          Description: ${h.description || ''}
+          Amenities: ${h.amenities || ''}
+          Restaurants: ${h.restaurants || ''}
+          Activities: ${h.activities || ''}
         `).join('\n')}`,
       },
       ...history.slice(-5).map(m => ({ role: m.role, content: m.content })),
@@ -197,9 +261,9 @@ export class WorkflowManager {
       } else if (hotels.length > 0) {
         const city = hotels[0].location;
         suggestions = [
-          `What are the dining options at the ${hotels[0].name}?`,
+          `Tell me more about ${hotels[0].name}`,
           `Show me Luxury hotels in ${city}`,
-          `Any Marriotts with a rooftop in ${city}?`,
+          `Any Marriotts with a spa in ${city}?`,
         ];
       } else {
         suggestions = ["Show me Marriotts in London", "Best family-friendly Marriotts?", "Find a beach resort"];

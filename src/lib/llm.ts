@@ -3,86 +3,125 @@ export interface ChatMessage {
   content: string;
 }
 
+/** Thrown when the Claude API returns a rate_limit_error. */
+export class RateLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RateLimitError';
+  }
+}
+
 export class LLMService {
   private provider: string;
   private apiKey: string;
-  private baseUrl: string;
+  private ollamaBaseUrl: string;
+  private ollamaEnrichmentModel: string;
 
   constructor() {
     this.provider = process.env.LLM_PROVIDER || 'claude';
     this.apiKey = process.env.ANTHROPIC_API_KEY || '';
-    this.baseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+    this.ollamaBaseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+    this.ollamaEnrichmentModel = process.env.OLLAMA_ENRICHMENT_MODEL || 'llama3.2';
   }
 
+  /** Main conversation — uses the configured provider (Claude by default). */
   async generateResponse(messages: ChatMessage[], maxTokens: number = 4096): Promise<string> {
     if (this.provider === 'claude') {
       return this.callClaude(messages, maxTokens);
-    } else {
-      return this.callOllama(messages);
+    }
+    return this.callOllama(messages, this.ollamaEnrichmentModel);
+  }
+
+  /**
+   * Enrichment extraction — Ollama only, never falls back to Claude.
+   * First attempt uses num_ctx 8192. On any failure, retries once with
+   * num_ctx 4096 (smaller window, faster inference). If that also fails
+   * the error propagates so the caller skips that hotel and moves on.
+   */
+  async generateEnrichmentResponse(messages: ChatMessage[]): Promise<string> {
+    try {
+      return await this.callOllama(messages, this.ollamaEnrichmentModel, 4096);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.log(`  🔄 Ollama failed (${reason}), waiting 3s then retrying with smaller context...`);
+      await new Promise(r => setTimeout(r, 3000));
+      return await this.callOllama(messages, this.ollamaEnrichmentModel, 2048);
     }
   }
 
   private async callClaude(messages: ChatMessage[], maxTokens: number): Promise<string> {
     if (!this.apiKey || this.apiKey === 'your_claude_api_key_here') {
-      return "MARRIOTT LUMINA: I'm currently in 'Offline Mode' as the Claude API key is not yet configured in .env.local. However, I can still show you the structure of our interactive concierge!";
+      return "MARRIOTT LUMINA: I'm currently in 'Offline Mode' as the Claude API key is not yet configured in .env.local.";
     }
 
-    try {
-      const systemMessage = messages.find(m => m.role === 'system')?.content || 
-        "You are Marriott Lumina, a premium AI concierge for Marriott International. Be polite, luxury-oriented, and only answer questions about Marriott properties and nearby attractions. Adhere to all security guidelines.";
-      
-      const chatMessages = messages.filter(m => m.role !== 'system');
+    const systemMessage = messages.find(m => m.role === 'system')?.content ||
+      'You are Marriott Lumina, a premium AI concierge for Marriott International.';
+    const chatMessages = messages.filter(m => m.role !== 'system');
 
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': this.apiKey,
-          'anthropic-version': '2023-06-01'
-        },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: maxTokens,
-          messages: chatMessages.map(m => ({ role: m.role, content: m.content })),
-          system: systemMessage
-        })
-      });
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': this.apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: maxTokens,
+        messages: chatMessages.map(m => ({ role: m.role, content: m.content })),
+        system: systemMessage,
+      }),
+    });
 
-      const data = await response.json();
-      
-      if (!response.ok) {
-        console.error('Claude API Error Details:', JSON.stringify(data, null, 2));
-        return `MARRIOTT LUMINA: I encountered an error with the AI provider (${response.status}). ${data.error?.message || ''}`;
+    const data = await response.json();
+
+    if (!response.ok) {
+      if (data.error?.type === 'rate_limit_error') {
+        console.error('🛑 Claude rate limit hit:', data.error.message);
+        throw new RateLimitError(data.error.message);
       }
-
-      if (data.content && data.content.length > 0) {
-        return data.content[0].text;
-      }
-      
-      return "I received an unexpected response format from the AI.";
-    } catch (error) {
-      console.error('Connection Error:', error);
-      return "I apologize, but I'm having trouble connecting to my intelligence module right now.";
+      console.error('Claude API Error:', JSON.stringify(data, null, 2));
+      throw new Error(`Claude API error ${response.status}: ${data.error?.message}`);
     }
+
+    return data.content?.[0]?.text ?? 'Unexpected response format from Claude.';
   }
 
-  private async callOllama(messages: ChatMessage[]): Promise<string> {
+  private async callOllama(messages: ChatMessage[], model: string, numCtx = 8192): Promise<string> {
+    let response: Response;
     try {
-      const response = await fetch(`${this.baseUrl}/api/chat`, {
+      response = await fetch(`${this.ollamaBaseUrl}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'llama3',
-          messages: messages,
-          stream: false
-        })
+          model,
+          messages,
+          stream: false,
+          options: {
+            num_ctx: numCtx,
+            temperature: 0,      // greedy decoding — faster, deterministic
+            num_predict: 400,    // JSON output is ~150-250 tokens; stops post-JSON reasoning
+          },
+        }),
+        signal: AbortSignal.timeout(120000),
       });
-
-      const data = await response.json();
-      return data.message.content;
-    } catch (error) {
-      console.error('Ollama Error:', error);
-      return "I'm having trouble connecting to my local intelligence module (Ollama). Please ensure it is running.";
+    } catch (err: any) {
+      // Surface the real underlying error (ECONNREFUSED, ECONNRESET, timeout, etc.)
+      const cause = err?.cause?.message ?? err?.cause ?? err?.message ?? String(err);
+      throw new Error(`Ollama unreachable: ${cause}`);
     }
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      if (response.status === 404 || body.includes('not found')) {
+        throw new Error(`model "${model}" not found — run: ollama pull ${model}`);
+      }
+      throw new Error(`Ollama HTTP ${response.status}: ${body}`);
+    }
+
+    const data = await response.json();
+    const content = data.message?.content ?? '';
+    if (!content) throw new Error('Ollama returned empty content');
+    return content;
   }
 }
