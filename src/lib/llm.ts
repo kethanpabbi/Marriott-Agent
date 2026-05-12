@@ -43,7 +43,8 @@ export class LLMService {
       return await this.callOllama(messages, this.ollamaEnrichmentModel, 4096);
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      console.log(`  🔄 Ollama failed (${reason}), retrying with smaller context...`);
+      console.log(`  🔄 Ollama failed (${reason}), waiting 3s then retrying with smaller context...`);
+      await new Promise(r => setTimeout(r, 3000));
       return await this.callOllama(messages, this.ollamaEnrichmentModel, 2048);
     }
   }
@@ -87,21 +88,28 @@ export class LLMService {
   }
 
   private async callOllama(messages: ChatMessage[], model: string, numCtx = 8192): Promise<string> {
-    const response = await fetch(`${this.ollamaBaseUrl}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages,
-        stream: false,
-        options: {
-          num_ctx: numCtx,
-          temperature: 0,      // greedy decoding — faster, deterministic
-          num_predict: 400,    // JSON output is ~150-250 tokens; stops post-JSON reasoning
-        },
-      }),
-      signal: AbortSignal.timeout(120000),
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${this.ollamaBaseUrl}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          messages,
+          stream: false,
+          options: {
+            num_ctx: numCtx,
+            temperature: 0,      // greedy decoding — faster, deterministic
+            num_predict: 400,    // JSON output is ~150-250 tokens; stops post-JSON reasoning
+          },
+        }),
+        signal: AbortSignal.timeout(120000),
+      });
+    } catch (err: any) {
+      // Surface the real underlying error (ECONNREFUSED, ECONNRESET, timeout, etc.)
+      const cause = err?.cause?.message ?? err?.cause ?? err?.message ?? String(err);
+      throw new Error(`Ollama unreachable: ${cause}`);
+    }
 
     if (!response.ok) {
       const body = await response.text().catch(() => '');
