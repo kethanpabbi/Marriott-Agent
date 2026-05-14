@@ -172,7 +172,7 @@ The original orchestration approach. Every step is hand-coded inside `WorkflowMa
 
 ```mermaid
 flowchart TD
-    A([Browser]) -->|POST /api/chat\n{ email, query }| B[/api/chat]
+    A([Browser]) -->|POST /api/chat| B["/api/chat"]
     B --> C{Rate limit}
     C -->|Blocked| Z1([429])
     C -->|OK| D[checkSecurity]
@@ -181,7 +181,7 @@ flowchart TD
     E --> E1[getChatHistory\nlast 5 turns]
     E --> E2[getOrCreateUser\npreference profile]
     E1 & E2 --> F[LLM Call 1\nReasoning — Claude Haiku]
-    F -->|JSON: location, country,\nisBudget, preferences| G{inScope?}
+    F -->|location, country, isBudget, preferences| G{inScope?}
     G -->|No| Z3([Out of scope reply])
     G -->|Yes| H[Update preferences]
     H --> I[syncLocation\nfire-and-forget]
@@ -191,7 +191,7 @@ flowchart TD
     L --> M[LLM Call 2\nResponse — Claude Haiku]
     M --> N[Parse SUGGESTIONS block]
     N --> O[logInteraction]
-    O --> P([{ response, suggestions }])
+    O --> P([response + suggestions])
 ```
 
 ### Limitations
@@ -252,18 +252,18 @@ Drain event stream:
 
 ```mermaid
 flowchart TD
-    A([Browser]) -->|POST /api/agent\n{ email, query, managedSessionId? }| B[/api/agent]
+    A([Browser]) -->|POST /api/agent| B["/api/agent"]
 
-    B --> C{managedSessionId\nprovided?}
+    B --> C{managedSessionId provided?}
     C -->|Yes| D[Reuse existing\nConsole session]
-    C -->|No - first message| E[Create new\nConsole session]
+    C -->|No — first message| E[Create new\nConsole session]
     E --> D
 
     D --> F[Open SSE stream\nstream-first]
     F --> G[Send user.message\nto session]
 
     G --> H{Drain event stream}
-    H -->|agent.thinking\nspan.model_request_*\nsession.status_running| H
+    H -->|agent.thinking / status_running| H
 
     H -->|agent.custom_tool_use| I[Collect tool calls]
     I --> H
@@ -271,24 +271,24 @@ flowchart TD
     H -->|agent.message| J[Accumulate\nresponse text]
     J --> H
 
-    H -->|session.status_idle\nrequires_action, no new calls\nintermediate idle| H
+    H -->|status_idle requires_action\nno new calls — intermediate| H
 
-    H -->|session.status_idle\nrequires_action + new tool calls| K[Execute tools\nin parallel]
+    H -->|status_idle requires_action\nnew tool calls| K[Execute tools\nin parallel]
 
     K --> K1[get_user_profile\nUserAgent directly]
-    K --> K2[search_hotels\nHotelsAgent directly\n+ pickOnePerTier]
+    K --> K2[search_hotels\nHotelsAgent directly]
     K --> K3[update_preferences\nUserAgent directly]
 
     K1 & K2 & K3 --> L[Open new SSE stream]
     L --> M[Send tool results\nto session]
     M --> H
 
-    H -->|session.status_idle\nend_turn| N[Parse SUGGESTIONS]
-    H -->|session.status_terminated| N
+    H -->|status_idle end_turn| N[Parse SUGGESTIONS]
+    H -->|status_terminated| N
 
     N --> O[getOrCreateUser\nFK guard]
     O --> P[logInteraction]
-    P --> Q([{ response, suggestions,\nmanagedSessionId }])
+    P --> Q([response + suggestions + managedSessionId])
 
     Q -->|stored in React state| A
 ```
@@ -341,8 +341,8 @@ flowchart LR
     A[Hotel\nenriched=false] --> B[DuckDuckGo Lite\nsearch by hotel name]
     B --> C[Booking.com\nhotel page URL]
     C --> D[Jina Reader\nfetch page text]
-    D --> E[Ollama llama3.1:8b\ntemp=0, 400 tokens]
-    E -->|rating, priceRange,\namenitites, restaurants,\nactivities| F[Prisma upsert\nenriched=true]
+    D --> E[Ollama llama3.1:8b\ntemp=0 / 400 tokens]
+    E -->|rating, priceRange, amenities\nrestaurants, activities| F[Prisma upsert\nenriched=true]
 ```
 
 Hotels are enriched once and never re-processed. A module-level `Set` prevents concurrent enrichment runs for the same location.
